@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DV360S Studio",
+  "mainBinaryName": "dv360s-studio",
+  "version": "0.1.0",
+  "identifier": "com.luizneto.dv360s-studio",
+  "build": {
+    "beforeDevCommand": "npm run vite",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run vite:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "DV360S Studio",
+        "width": 1320,
+        "height": 820,
+        "minWidth": 1040,
+        "minHeight": 660,
+        "dragDropEnabled": false,
+        "backgroundColor": "#0e0f13"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage"],
+    "category": "Utility",
+    "shortDescription": "Temas para a tela do water cooler DV360S",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ]
+  }
+}
