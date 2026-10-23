@@ -1,0 +1,14 @@
+[package]
+name = "dv360s-core"
+description = "Protocolo USB, formato .dvtheme e renderizador do display DV360S"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rusb = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+jpeg-encoder = "0.7"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
