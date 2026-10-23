@@ -1,0 +1,12 @@
+[package]
+name = "dv360s-player"
+description = "Serviço leve que mantém um tema .dvtheme na tela do water cooler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dv360s-core = { path = "../core" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+signal-hook = "0.4"
