@@ -264,11 +264,18 @@ export function addScreen(sc: Screen) {
   store.set({ screenId: sc.id, selectedId: null, tool: "select" });
 }
 
+/** Exclui uma tela (sobra pelo menos uma). Excluindo a principal, a seguinte vira a principal
+ *  e perde as condições (a principal é a que aparece quando nenhuma outra vale). */
 export function removeScreen(id: string) {
   const i = state.project.screens.findIndex((x) => x.id === id);
-  if (i <= 0) return;
-  store.update((p) => ({ ...p, screens: p.screens.filter((x) => x.id !== id) }));
-  store.set({ screenId: state.project.screens[Math.min(i, state.project.screens.length - 1)].id, selectedId: null });
+  if (i < 0 || state.project.screens.length <= 1) return;
+  store.update((p) => {
+    const screens = p.screens.filter((x) => x.id !== id);
+    if (i === 0) screens[0] = { ...screens[0], rules: [] };
+    return { ...p, screens };
+  });
+  const screens = state.project.screens;
+  store.set({ screenId: screens[Math.min(Math.max(0, i - 1), screens.length - 1)].id, selectedId: null, tool: "select" });
 }
 
 /** Muda a prioridade (a principal fica sempre em 0). */

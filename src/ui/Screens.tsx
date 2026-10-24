@@ -7,7 +7,8 @@ import { activeScreen, describeRule, MONTHS, ruleOk, rulesUseSensors, SENSOR_INF
 import { addScreen, curScreen, moveScreen, removeScreen, selectScreen, store, updateScreen, useStore } from "../store";
 import type { Rule, RuleType, Screen, SensorName } from "../types";
 import { NumberField, Row, Section, Segmented, Select, Slider, Toggle, useDismiss } from "./controls";
-import { IconCalendar, IconClock, IconMore, IconPlus, IconThermometer, IconX } from "./icons";
+import { toast } from "./feedback";
+import { IconCalendar, IconClock, IconMore, IconPlus, IconThermometer, IconTrash, IconX } from "./icons";
 
 /** Reavalia as condições com o relógio (a cada 15 s) e com os sensores (quando mudam). */
 function useNow() {
@@ -23,6 +24,12 @@ function useNow() {
     };
   }, [usesSensors]);
   return { now: new Date(), sens: liveReadings() };
+}
+
+/** Exclui com aviso (Ctrl Z desfaz). */
+function deleteScreen(sc: Screen, isMain: boolean) {
+  removeScreen(sc.id);
+  toast(isMain ? `Tela “${sc.name}” excluída; a seguinte virou a principal (Ctrl Z desfaz)` : `Tela “${sc.name}” excluída (Ctrl Z desfaz)`);
 }
 
 function ruleIcon(t: RuleType) {
@@ -94,6 +101,21 @@ export function ScreenTabs() {
               {sc.rules.length ? [...new Set(sc.rules.map((r) => r.type))].map((t) => <span key={t}>{ruleIcon(t)}</span>) : "—"}
             </span>
           )}
+          {screens.length > 1 && (
+            <span
+              role="button"
+              tabIndex={-1}
+              className="screen-tab-close"
+              title="Excluir esta tela"
+              aria-label={`Excluir a tela ${sc.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteScreen(sc, i === 0);
+              }}
+            >
+              <IconX size={12} />
+            </span>
+          )}
         </button>
       ))}
       </div>
@@ -137,7 +159,7 @@ export function ScreenTabs() {
         )}
       </Menu>
 
-      {curIndex > 0 && (
+      {screens.length > 1 && (
         <Menu
           align="right"
           button={(open, toggle) => (
@@ -148,17 +170,21 @@ export function ScreenTabs() {
         >
           {(close) => (
             <div className="menu-group">
-              <button type="button" className="menu-item" onClick={() => (close(), create(cur.name, structuredClone(cur.rules), true))}>
-                Duplicar tela
-              </button>
-              <button type="button" className="menu-item" disabled={curIndex <= 1} onClick={() => (close(), moveScreen(cur.id, -1))}>
-                ← Aumentar prioridade
-              </button>
-              <button type="button" className="menu-item" disabled={curIndex >= screens.length - 1} onClick={() => (close(), moveScreen(cur.id, 1))}>
-                Diminuir prioridade →
-              </button>
-              <button type="button" className="menu-item danger" onClick={() => (close(), removeScreen(cur.id))}>
-                Excluir tela
+              {curIndex > 0 && (
+                <>
+                  <button type="button" className="menu-item" onClick={() => (close(), create(cur.name, structuredClone(cur.rules), true))}>
+                    Duplicar tela
+                  </button>
+                  <button type="button" className="menu-item" disabled={curIndex <= 1} onClick={() => (close(), moveScreen(cur.id, -1))}>
+                    ← Aumentar prioridade
+                  </button>
+                  <button type="button" className="menu-item" disabled={curIndex >= screens.length - 1} onClick={() => (close(), moveScreen(cur.id, 1))}>
+                    Diminuir prioridade →
+                  </button>
+                </>
+              )}
+              <button type="button" className="menu-item danger" onClick={() => (close(), deleteScreen(cur, curIndex === 0))}>
+                Excluir tela “{cur.name}”
               </button>
             </div>
           )}
@@ -307,6 +333,13 @@ export function ScreenSettings() {
       <p className="note">
         Agora valeria: <strong>{live.name}</strong>
       </p>
+      {project.screens.length > 1 && (
+        <div className="btn-row">
+          <button type="button" className="btn small danger-outline" onClick={() => deleteScreen(sc, isMain)}>
+            <IconTrash size={13} /> Excluir esta tela
+          </button>
+        </div>
+      )}
     </Section>
   );
 }

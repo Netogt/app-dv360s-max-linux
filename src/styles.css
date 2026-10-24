@@ -1507,6 +1507,36 @@ button:disabled {
   background: var(--panel-2);
 }
 
+.screen-tab-close {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: -6px;
+  border-radius: 4px;
+  color: var(--muted);
+  opacity: 0;
+}
+
+.screen-tab:hover .screen-tab-close,
+.screen-tab.on .screen-tab-close {
+  opacity: 1;
+}
+
+.screen-tab-close:hover {
+  background: rgba(248, 113, 113, 0.16);
+  color: var(--danger);
+}
+
+.btn.danger-outline {
+  color: var(--text-2);
+}
+
+.btn.danger-outline:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
 .screen-tab.on {
   background: var(--accent-soft);
   border-color: rgba(91, 140, 255, 0.4);
