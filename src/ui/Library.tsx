@@ -10,7 +10,7 @@ import { store, useStore } from "../store";
 import { SIZE } from "../types";
 import { formatBytes } from "../util";
 import { toast } from "./feedback";
-import { IconCheck, IconFile, IconFolder, IconImage, IconSave, IconSend, IconTrash, IconX } from "./icons";
+import { IconCheck, IconEdit, IconFile, IconFolder, IconImage, IconSave, IconSend, IconTrash, IconX } from "./icons";
 
 export type LibraryTab = "mine" | "examples";
 
@@ -169,10 +169,16 @@ function MyThemes({ close }: { close: () => void }) {
                 <button type="button" className="btn small primary" disabled={busy === t.path} onClick={() => apply(t)} title="Mostrar no cooler">
                   <IconSend size={13} /> {t.active ? "Reaplicar" : "Pôr na tela"}
                 </button>
-                <button type="button" className="btn small" onClick={() => openPath(t.path).then((ok) => ok && close())}>
-                  Editar
+                <button
+                  type="button"
+                  className="btn small square"
+                  onClick={() => openPath(t.path).then((ok) => ok && close())}
+                  title="Editar"
+                  aria-label="Editar"
+                >
+                  <IconEdit size={14} />
                 </button>
-                <button type="button" className="icon-btn danger" onClick={() => remove(t)} title="Excluir">
+                <button type="button" className="btn small square danger" onClick={() => remove(t)} title="Excluir" aria-label="Excluir">
                   <IconTrash size={14} />
                 </button>
               </div>

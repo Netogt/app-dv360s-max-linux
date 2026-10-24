@@ -74,6 +74,35 @@ export async function importFiles(files: File[], asBackground = false) {
   }
 }
 
+/** Um arrastar traz arquivos do sistema? No WebKitGTK, o que vem do gerenciador de arquivos
+ *  muitas vezes chega só como endereço (text/uri-list), sem o tipo "Files". */
+export function dragHasFiles(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  const types = Array.from(dt.types);
+  return types.includes("Files") || types.includes("text/uri-list") || types.includes("application/x-moz-file");
+}
+
+/** Arquivos soltos: os File do navegador ou, se vierem só os endereços file://, lidos do disco. */
+export async function droppedFiles(dt: DataTransfer): Promise<File[]> {
+  const files = Array.from(dt.files);
+  if (files.length) return files;
+  const uris = (dt.getData("text/uri-list") || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("file://"));
+  const out: File[] = [];
+  for (const u of uris) {
+    const path = decodeURIComponent(new URL(u).pathname);
+    try {
+      const bytes = await api.readFile(path);
+      out.push(new File([bytes as BlobPart], path.split("/").pop() || "arquivo"));
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  }
+  return out;
+}
+
 /** Abre o seletor de arquivos do sistema (via <input>, que já devolve File). */
 export function pickMedia(accept: string, asBackground = false) {
   const input = document.createElement("input");

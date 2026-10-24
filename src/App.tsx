@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { applyToScreen, importFiles, loadDraft, saveDocument, saveDraft } from "./actions";
+import { applyToScreen, dragHasFiles, droppedFiles, importFiles, loadDraft, saveDocument, saveDraft } from "./actions";
 import { isLive, setLive } from "./live";
 import { curLayers, duplicateLayer, getLayer, moveLayer, nudge, removeLayer, select, store } from "./store";
 import { Inspector } from "./ui/Inspector";
@@ -107,11 +107,26 @@ function useShortcuts() {
         importFiles(files);
       }
     };
+    // soltar um arquivo fora do palco não pode fazer a página "abrir" o arquivo (o editor
+    // seria substituído pelo vídeo/imagem); vira uma camada nova
+    const onDragOver = (e: DragEvent) => {
+      if (dragHasFiles(e.dataTransfer)) e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      const handled = e.defaultPrevented;
+      e.preventDefault();
+      if (!handled && e.dataTransfer) droppedFiles(e.dataTransfer).then((f) => importFiles(f));
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("paste", onPaste);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("paste", onPaste);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
     };
   }, []);
 }

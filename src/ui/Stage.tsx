@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { importFiles } from "../actions";
+import { dragHasFiles, droppedFiles, importFiles } from "../actions";
 import { drawingLayer } from "../defaults";
 import { liveFrame, useLive } from "../live";
 import { onAssetsChanged } from "../render/assets";
@@ -350,7 +350,7 @@ export function Stage() {
   };
 
   // arrastar arquivos do sistema
-  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
+  const hasFiles = (e: React.DragEvent) => dragHasFiles(e.dataTransfer);
   const onDragOver = (e: React.DragEvent) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
@@ -360,9 +360,9 @@ export function Stage() {
   const onDrop = (e: React.DragEvent) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    const zone = drop;
+    const zone = (e.target as HTMLElement).closest<HTMLElement>("[data-zone]")?.dataset.zone ?? drop;
     setDrop(null);
-    importFiles(Array.from(e.dataTransfer.files), zone === "bg");
+    droppedFiles(e.dataTransfer).then((files) => importFiles(files, zone === "bg"));
   };
 
   const setZoom = (z: number | "fit") => store.set({ zoom: z });

@@ -1850,6 +1850,23 @@ button:disabled {
 
 .lib-card-actions .btn.primary {
   flex: 1;
+  min-width: 0;
+}
+
+.btn.square {
+  width: 28px;
+  padding: 0;
+  flex: none;
+  color: var(--text-2);
+}
+
+.btn.square:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.btn.square.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.5);
 }
 
 .lib-empty {
