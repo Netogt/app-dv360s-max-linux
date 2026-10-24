@@ -1,0 +1,11 @@
+[package]
+name = "dv360s-tray"
+description = "Ícone na bandeja: troca o tema, brilho e rotação da tela do cooler sem abrir o editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dv360s-core = { path = "../core" }
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
+serde_json = "1"
