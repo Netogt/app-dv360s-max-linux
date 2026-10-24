@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ACCEPT_IMAGE, ACCEPT_VIDEO, pickMedia, setBackgroundMedia } from "../actions";
+import { ACCEPT_IMAGE, ACCEPT_VIDEO, pickMedia, renderSpeed, setBackgroundMedia } from "../actions";
+import { drawScene } from "../render/draw";
+import { formatBytes } from "../util";
 import { CLOCK_PRESETS, FONT_FALLBACK } from "../defaults";
 import { api } from "../io";
-import { getAsset, loopDuration, type RuntimeAsset } from "../render/assets";
+import { getAsset, loopDuration, onAssetsChanged, type RuntimeAsset } from "../render/assets";
 import { estimateFrames } from "../render/compile";
 import { liveReadings, watchSensors } from "../render/sensors";
 import { TOKEN_HELP, usesSensors } from "../render/text";
 import { curLayers, curScreen, store, updateLayer, updateProject, useStore } from "../store";
-import { ScreenSettings } from "./Screens";
+import { ScreenSettings, SensorSimulator } from "./Screens";
+import { ShortcutList } from "./Shortcuts";
 import type {
-  BackgroundLayer, BasePatch, ClockLayer, DrawingLayer, Fill, Fit, Layer, MediaLayer, Playback, ShapeLayer, TextLayer, TextStyle,
+  BackgroundLayer, BasePatch, ClockLayer, DrawingLayer, Fill, Fit, Layer, MediaLayer, Playback, Project, ShapeLayer, TextLayer, TextStyle,
 } from "../types";
 import { SIZE } from "../types";
 import { ColorField, NumberField, Row, Section, Segmented, Select, Slider, Toggle, useDismiss } from "./controls";
@@ -34,6 +37,9 @@ const KIND_LABEL: Record<Layer["kind"], string> = {
 };
 
 export function Inspector() {
+  // mídias carregando (vídeo em preparação) mudam o que o painel mostra
+  const [, assetsTick] = useState(0);
+  useEffect(() => onAssetsChanged(() => assetsTick((n) => n + 1)), []);
   const selectedId = useStore((s) => s.selectedId);
   const screenId = useStore((s) => s.screenId);
   const screenName = useStore((s) => curScreen(s).name);
@@ -63,6 +69,7 @@ export function Inspector() {
           </header>
           <div className="panel-scroll" key={screenId}>
             <ScreenSettings />
+            <SensorSimulator />
             <ThemeSettings />
           </div>
         </>
@@ -115,9 +122,35 @@ function LayerInspector({ l }: { l: Layer }) {
 
 // ---------- tema ----------
 
+/** Tamanho de um quadro JPEG desta tela (renderiza um de amostra, com atraso para não pesar). */
+function useFrameBytes(p: Project): number | null {
+  const [bytes, setBytes] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(() => {
+      const c = document.createElement("canvas");
+      c.width = SIZE;
+      c.height = SIZE;
+      drawScene(c.getContext("2d")!, p.screens[0].layers, { t: 0, now: new Date(), mode: "preview" });
+      c.toBlob((b) => alive && b && setBytes(b.size), "image/jpeg", p.quality / 100);
+    }, 600);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [p]);
+  return bytes;
+}
+
+const duration = (s: number) => (s < 90 ? `${Math.max(1, Math.round(s))} s` : `${Math.round(s / 60)} min`);
+
 function ThemeSettings() {
   const p = useStore((s) => s.project);
   const frames = useMemo(() => p.screens.reduce((n, sc) => n + estimateFrames(p, sc.layers), 0), [p]);
+  const sample = useFrameBytes(p);
+  const speed = renderSpeed();
+  // quadros acima de 64 KB têm a qualidade reduzida até caber
+  const perFrame = sample == null ? null : Math.min(sample, 0xffff);
   return (
     <>
       <Section title="Tema">
@@ -142,6 +175,14 @@ function ThemeSettings() {
             ? `O tema terá ${frames} quadros (${(frames / p.fps).toFixed(1)} s em loop).`
             : "Tema estático: o player envia um quadro só e o atualiza quando a hora muda."}
         </p>
+        {frames > 1 && (
+          <dl className="estimate">
+            <dt>Tamanho</dt>
+            <dd>{perFrame == null ? "calculando…" : `≈ ${formatBytes(perFrame * frames)}`}</dd>
+            <dt>Para gerar</dt>
+            <dd>{speed ? `≈ ${duration((speed.msPerFrame * frames) / 1000)}` : "medido após o primeiro envio"}</dd>
+          </dl>
+        )}
       </Section>
       <Section title="Qualidade">
         <Row label="JPEG" hint="Quadros acima de 64 KB têm a qualidade reduzida automaticamente.">
@@ -149,19 +190,7 @@ function ThemeSettings() {
         </Row>
       </Section>
       <Section title="Atalhos" defaultOpen={false}>
-        <dl className="shortcuts">
-          <dt>Ctrl S</dt><dd>Salvar</dd>
-          <dt>Ctrl Enter</dt><dd>Enviar para a tela</dd>
-          <dt>Ctrl Z / Ctrl Shift Z</dt><dd>Desfazer / refazer</dd>
-          <dt>Ctrl D</dt><dd>Duplicar camada</dd>
-          <dt>Delete</dt><dd>Excluir camada</dd>
-          <dt>Setas</dt><dd>Mover 1 px (Shift: 10 px)</dd>
-          <dt>V / B / E</dt><dd>Selecionar / pincel / borracha</dd>
-          <dt>Espaço</dt><dd>Tocar / pausar a prévia</dd>
-          <dt>Shift ao redimensionar</dt><dd>Inverte a trava de proporção</dd>
-          <dt>Alt ao redimensionar</dt><dd>A partir do centro</dd>
-          <dt>Ctrl ao mover</dt><dd>Sem encaixe nas guias</dd>
-        </dl>
+        <ShortcutList />
       </Section>
     </>
   );
@@ -204,6 +233,18 @@ function TransformSection({ l }: { l: Layer }) {
 function AssetInfo({ a }: { a: RuntimeAsset | undefined }) {
   if (!a) return <p className="note warn">Arquivo de mídia ausente.</p>;
   if (a.error) return <p className="note warn">{a.error}</p>;
+  if (a.progress) {
+    const pct = a.progress.total ? Math.round((a.progress.done / a.progress.total) * 100) : 0;
+    return (
+      <div className="asset-info">
+        <span className="asset-name" title={a.meta.name}>{a.meta.name}</span>
+        <span className="muted">Preparando o vídeo… {a.progress.total ? `${pct}%` : ""}</span>
+        <div className="progress">
+          <div className={`progress-bar ${a.progress.total ? "" : "indeterminate"}`} style={{ width: a.progress.total ? `${pct}%` : undefined }} />
+        </div>
+      </div>
+    );
+  }
   const kind = a.meta.type === "gif" ? `GIF · ${a.gif?.frames.length ?? "…"} quadros` : a.meta.type === "video" ? "Vídeo" : "Imagem";
   return (
     <div className="asset-info">

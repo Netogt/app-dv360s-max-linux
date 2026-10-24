@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { applyToScreen, newDocument, openDocument, saveDocument } from "../actions";
+import { applyToScreen, saveDocument } from "../actions";
+import { setLive, useLive } from "../live";
 import { api, type PlayerConfig, type PlayerStatus } from "../io";
 import { playerConfig, usePlayerConfig } from "../playerConfig";
 import { store, useStore } from "../store";
 import { Segmented, Slider, Toggle, useDismiss } from "./controls";
 import { toast } from "./feedback";
 import { IconAlert, IconCpu, IconFile, IconFolder, IconRedo, IconSave, IconSend, IconSun, IconUndo } from "./icons";
+import { openLibrary } from "./Library";
 
 type Tone = "ok" | "warn" | "off" | "error";
 
@@ -44,7 +46,7 @@ function DeviceStatus() {
     try {
       const s = await api.status();
       setSt(s);
-      playerConfig.init(s.config);
+      playerConfig.sync(s.config);
     } catch {
       // fora do Tauri (ex.: vite no navegador)
     }
@@ -127,6 +129,16 @@ function DeviceStatus() {
               label="Iniciar com o sistema"
             />
           </div>
+          <div className="menu-field">
+            <Toggle
+              checked={st.trayRunning}
+              onChange={(v) =>
+                run(() => api.setTray(v), v ? "Ícone na bandeja ligado (e iniciando com a sessão)" : "Ícone na bandeja desligado")
+              }
+              label="Ícone na bandeja"
+            />
+            {!st.trayFound && <span className="muted small">Compile com “cargo build --release -p dv360s-tray” ou rode scripts/install.sh.</span>}
+          </div>
 
           <div className="btn-row">
             {st.running ? (
@@ -147,6 +159,25 @@ function DeviceStatus() {
   );
 }
 
+function LiveButton() {
+  const live = useLive();
+  return (
+    <button
+      type="button"
+      className={`btn live-btn ${live ? "on" : ""}`}
+      aria-pressed={live}
+      onClick={() => setLive(!live)}
+      title={
+        live
+          ? "O cooler está espelhando o editor. Clique para voltar ao tema aplicado (Ctrl L)"
+          : "Espelhar o editor no cooler enquanto edita, sem renderizar (Ctrl L)"
+      }
+    >
+      <span className="rec" /> Ao vivo
+    </button>
+  );
+}
+
 export function TopBar() {
   const name = useStore((s) => s.project.name);
   const filePath = useStore((s) => s.filePath);
@@ -164,11 +195,11 @@ export function TopBar() {
         <span className="brand-name">DV360S Studio</span>
       </div>
       <nav className="toolbar">
-        <button type="button" className="tb-btn" onClick={newDocument} title="Novo tema">
+        <button type="button" className="tb-btn" onClick={() => openLibrary("examples")} title="Novo tema: em branco ou a partir de um exemplo (Ctrl N)">
           <IconFile size={15} /> Novo
         </button>
-        <button type="button" className="tb-btn" onClick={openDocument} title="Abrir .dvtheme (Ctrl O)">
-          <IconFolder size={15} /> Abrir
+        <button type="button" className="tb-btn" onClick={() => openLibrary("mine")} title="Meus temas: abrir, pôr na tela, excluir (Ctrl O)">
+          <IconFolder size={15} /> Temas
         </button>
         <button type="button" className="tb-btn" onClick={() => saveDocument()} title="Salvar (Ctrl S) · Salvar como (Ctrl Shift S)">
           <IconSave size={15} /> Salvar
@@ -188,6 +219,7 @@ export function TopBar() {
       </div>
       <div className="topbar-right">
         <DeviceStatus />
+        <LiveButton />
         <button type="button" className="btn primary" onClick={applyToScreen} title="Renderiza e envia para o cooler (Ctrl Enter)">
           <IconSend size={15} /> Enviar para a tela
         </button>

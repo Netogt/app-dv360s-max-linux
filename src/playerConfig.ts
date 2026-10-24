@@ -7,6 +7,7 @@ import { toast } from "./ui/feedback";
 import { debounce } from "./util";
 
 let config: PlayerConfig | null = null;
+let editedAt = -Infinity;
 const ls = new Set<() => void>();
 const emit = () => ls.forEach((l) => l());
 
@@ -16,15 +17,18 @@ const save = debounce((c: PlayerConfig) => {
 
 export const playerConfig = {
   get: () => config,
-  /** Primeira leitura (vem junto com o status do player). */
-  init(c: PlayerConfig) {
-    if (config) return;
+  /** Valor lido do disco (vem junto com o status do player). Também pega mudanças feitas pela
+   *  bandeja, exceto logo depois de uma alteração aqui (que ainda pode estar sendo gravada). */
+  sync(c: PlayerConfig) {
+    if (performance.now() - editedAt < 3000) return;
+    if (config && config.brightness === c.brightness && config.rotation === c.rotation) return;
     config = c;
     emit();
   },
   update(patch: Partial<PlayerConfig>) {
     if (!config) return;
     config = { ...config, ...patch };
+    editedAt = performance.now();
     emit();
     save(config);
   },

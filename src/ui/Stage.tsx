@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { importFiles } from "../actions";
 import { drawingLayer } from "../defaults";
+import { liveFrame, useLive } from "../live";
 import { onAssetsChanged } from "../render/assets";
 import { drawScene, isAnimated } from "../render/draw";
-import { watchSensors } from "../render/sensors";
+import { setSimulated, useSimulated, watchSensors } from "../render/sensors";
 import { updatesEverySecond, usesSensors } from "../render/text";
 import { addLayer, curLayers, getLayer, select, store, updateLayer, useStore } from "../store";
 import type { ClockLayer, DrawingLayer, Layer, TextLayer } from "../types";
@@ -92,6 +93,8 @@ export function Stage() {
   const [drop, setDrop] = useState<null | "layer" | "bg">(null);
   const [assetsTick, setAssetsTick] = useState(0);
 
+  const live = useLive();
+  const simulated = useSimulated() != null;
   const pcfg = usePlayerConfig();
   const rotation = pcfg?.rotation ?? 0;
   const display = zoom === "fit" ? fit : Math.round(SIZE * zoom);
@@ -123,6 +126,7 @@ export function Stage() {
     ctx.setTransform(px / SIZE, 0, 0, px / SIZE, 0, 0);
     ctx.imageSmoothingQuality = "high";
     drawScene(ctx, curLayers(), { t: timeRef.current.t, now: new Date(), mode: "preview" });
+    liveFrame(timeRef.current.t);
   }, [display]);
 
   // ciclo de desenho: só anima quando precisa (o editor também deve ser leve)
@@ -390,6 +394,16 @@ export function Stage() {
       <div className="stage-scroll">
         <div className="stage" style={{ width: display, height: display }}>
           <canvas ref={canvasRef} style={{ width: display, height: display }} />
+          {live && (
+            <div className="live-badge" title="O cooler está mostrando esta prévia (o tema aplicado volta quando você desligar)">
+              <span className="rec" /> Ao vivo no cooler
+            </div>
+          )}
+          {simulated && (
+            <button type="button" className="sim-badge" onClick={() => setSimulated(null)} title="Clique para voltar aos valores reais">
+              Sensores simulados ✕
+            </button>
+          )}
           {rotation !== 0 && (
             <div className="rotation-badge" title="Tudo o que for enviado aparece girado no cooler">
               <IconRotate size={13} /> Girado {rotation}° no cooler

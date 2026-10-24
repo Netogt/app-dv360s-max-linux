@@ -2,16 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { background, cloneLayers, newRule, screen, SCREEN_PRESETS } from "../defaults";
-import { liveReadings, watchSensors } from "../render/sensors";
+import { liveReadings, realReadings, setSimulated, useSimulated, watchSensors } from "../render/sensors";
 import { activeScreen, describeRule, MONTHS, ruleOk, rulesUseSensors, SENSOR_INFO, WEEKDAYS } from "../render/rules";
 import { addScreen, curScreen, moveScreen, removeScreen, selectScreen, store, updateScreen, useStore } from "../store";
 import type { Rule, RuleType, Screen, SensorName } from "../types";
-import { NumberField, Row, Section, Segmented, Select, useDismiss } from "./controls";
+import { NumberField, Row, Section, Segmented, Select, Slider, Toggle, useDismiss } from "./controls";
 import { IconCalendar, IconClock, IconMore, IconPlus, IconThermometer, IconX } from "./icons";
 
 /** Reavalia as condições com o relógio (a cada 15 s) e com os sensores (quando mudam). */
 function useNow() {
   const [, tick] = useState(0);
+  useSimulated();
   const usesSensors = useStore((s) => rulesUseSensors(s.project));
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 15000);
@@ -306,6 +307,44 @@ export function ScreenSettings() {
       <p className="note">
         Agora valeria: <strong>{live.name}</strong>
       </p>
+    </Section>
+  );
+}
+
+/** Valores de mentira para testar telas por temperatura/uso (só no editor). */
+export function SensorSimulator() {
+  const sim = useSimulated();
+  const usedByRules = useStore((s) => rulesUseSensors(s.project));
+  const start = () => {
+    const real = realReadings();
+    const init: Partial<Record<SensorName, number>> = {};
+    for (const k of Object.keys(SENSOR_INFO) as SensorName[]) init[k] = Math.round(real[k] ?? 50);
+    setSimulated(init);
+  };
+  return (
+    <Section title="Simular sensores" defaultOpen={usedByRules}>
+      <Toggle checked={sim != null} onChange={(v) => (v ? start() : setSimulated(null))} label="Usar valores de teste" />
+      {sim ? (
+        <>
+          {(Object.keys(SENSOR_INFO) as SensorName[]).map((k) => (
+            <Row key={k} label={SENSOR_INFO[k].label}>
+              <Slider
+                value={sim[k] ?? 0}
+                min={0}
+                max={SENSOR_INFO[k].max}
+                onChange={(v) => setSimulated({ ...sim, [k]: v })}
+                format={(v) => `${v}${SENSOR_INFO[k].unit}`}
+              />
+            </Row>
+          ))}
+          <p className="note">
+            Só no editor: a prévia, as abas e “Agora valeria” usam estes valores. O tema aplicado no cooler continua
+            lendo os sensores reais; a prévia ao vivo mostra o que você vê aqui.
+          </p>
+        </>
+      ) : (
+        <p className="note">Teste as telas por temperatura ou uso sem precisar esquentar o PC.</p>
+      )}
     </Section>
   );
 }

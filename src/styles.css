@@ -1621,3 +1621,248 @@ button:disabled {
   border-color: var(--accent);
   color: var(--text);
 }
+
+/* ---------- prévia ao vivo ---------- */
+
+.rec {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.live-btn.on {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+}
+
+.live-btn.on .rec,
+.live-badge .rec {
+  background: var(--danger);
+  animation: rec 1.4s ease-in-out infinite;
+}
+
+@keyframes rec {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.live-badge,
+.sim-badge {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: rgba(13, 14, 18, 0.78);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.live-badge {
+  top: 10px;
+  right: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+  pointer-events: none;
+}
+
+.sim-badge {
+  bottom: 10px;
+  left: 10px;
+  border: 1px solid rgba(91, 140, 255, 0.5);
+  color: var(--accent-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sim-badge:hover {
+  background: rgba(27, 30, 37, 0.95);
+}
+
+/* ---------- estimativa ---------- */
+
+.estimate {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.estimate dt {
+  color: var(--muted);
+}
+
+.estimate dd {
+  margin: 0;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- biblioteca ---------- */
+
+.modal.library {
+  width: min(880px, calc(100vw - 48px));
+  height: min(640px, calc(100vh - 48px));
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.lib-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lib-head .segmented {
+  width: 320px;
+}
+
+.lib-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lib-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.lib-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  min-width: 0;
+}
+
+.lib-card.example {
+  cursor: pointer;
+}
+
+.lib-card.example:hover,
+.lib-card:focus-within {
+  border-color: var(--border-strong);
+  background: var(--panel-3);
+}
+
+.lib-card.active {
+  border-color: rgba(52, 211, 153, 0.5);
+}
+
+.lib-card.editing .lib-name::after {
+  content: " · aberto";
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.lib-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.lib-thumb.blank {
+  background: var(--bg);
+  border: 1px dashed var(--border-strong);
+}
+
+.lib-thumb img,
+.lib-thumb canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.lib-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: rgba(6, 40, 30, 0.85);
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lib-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.lib-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lib-card-actions .btn.primary {
+  flex: 1;
+}
+
+.lib-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  margin: 48px auto;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.shortcuts-modal {
+  width: 460px;
+}

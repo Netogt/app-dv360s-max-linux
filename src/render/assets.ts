@@ -1,6 +1,7 @@
 // Mídias carregadas na memória do editor. Os bytes ficam fora do estado (e do histórico de
 // desfazer); o projeto guarda só o id.
 
+import { listen } from "@tauri-apps/api/event";
 import { decompressFrames, parseGIF } from "gifuct-js";
 import { api } from "../io";
 import type { AssetMeta, AssetType, Playback } from "../types";
@@ -20,6 +21,14 @@ export interface RuntimeAsset {
   error?: string;
   /** vídeo: quadros JPEG extraídos pelo ffmpeg, decodificados sob demanda */
   seq?: VideoFrames;
+  /** vídeo sendo preparado pelo ffmpeg (quadros prontos / previstos) */
+  progress?: { done: number; total: number };
+}
+
+export interface LoadOpts {
+  onProgress?: (done: number, total: number) => void;
+  /** cancela a preparação do vídeo */
+  signal?: AbortSignal;
 }
 
 interface VideoFrames {
@@ -61,9 +70,24 @@ export function allAssets() {
   return assets;
 }
 
+function release(a: RuntimeAsset) {
+  URL.revokeObjectURL(a.url);
+  a.seq?.cache.forEach((bm) => bm.close());
+  a.gif?.frames.forEach((bm) => bm.close());
+}
+
 export function clearAssets() {
-  for (const a of assets.values()) URL.revokeObjectURL(a.url);
+  for (const a of assets.values()) release(a);
   assets.clear();
+}
+
+/** Esquece uma mídia (importação cancelada ou com erro). */
+export function dropAsset(id: string) {
+  const a = assets.get(id);
+  if (!a) return;
+  release(a);
+  assets.delete(id);
+  changed();
 }
 
 /** Limite de resolução guardada por quadro de GIF (a tela tem 480 px). */
@@ -159,10 +183,32 @@ function loadImage(a: RuntimeAsset) {
 
 // O <video> do WebKitGTK não entrega quadros ao canvas neste sistema (saem pretos), então o
 // vídeo é decodificado pelo ffmpeg e tratado como uma sequência de quadros, igual a um GIF.
-async function extractVideo(a: RuntimeAsset) {
-  const raw = await api.extractVideo(a.bytes, extOf(a.meta.name), VIDEO_FPS, VIDEO_MAX_S).catch((e) => {
+async function extractVideo(a: RuntimeAsset, opts?: LoadOpts) {
+  const id = a.meta.id;
+  a.progress = { done: 0, total: 0 };
+  let last = 0;
+  const unlisten = await listen<{ id: string; done: number; total: number }>("video-progress", ({ payload }) => {
+    if (payload.id !== id) return;
+    a.progress = { done: payload.done, total: payload.total };
+    opts?.onProgress?.(payload.done, payload.total);
+    // o painel mostra a porcentagem; não precisa redesenhar a cada evento
+    if (performance.now() - last > 500) {
+      last = performance.now();
+      changed();
+    }
+  }).catch(() => undefined);
+  const cancel = () => void api.cancelVideo(id).catch(() => {});
+  opts?.signal?.addEventListener("abort", cancel);
+  let raw: Uint8Array;
+  try {
+    raw = await api.extractVideo(id, a.bytes, extOf(a.meta.name), VIDEO_FPS, VIDEO_MAX_S);
+  } catch (e) {
     throw new Error(String(e));
-  });
+  } finally {
+    unlisten?.();
+    opts?.signal?.removeEventListener("abort", cancel);
+    a.progress = undefined;
+  }
   const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
   const n = dv.getUint32(0, true);
   const frames: Uint8Array[] = [];
@@ -234,12 +280,12 @@ export async function ensureVideoFrame(a: RuntimeAsset, time: number): Promise<v
   if (a.seq) await decodeFrame(a, frameIndex(a.seq, time));
 }
 
-export function registerAsset(meta: AssetMeta, bytes: Uint8Array): RuntimeAsset {
+export function registerAsset(meta: AssetMeta, bytes: Uint8Array, opts?: LoadOpts): RuntimeAsset {
   const old = assets.get(meta.id);
   if (old) return old;
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: meta.mime }));
   const a: RuntimeAsset = { meta, bytes, url, width: 480, height: 480, duration: 0, ready: Promise.resolve() };
-  const load = meta.type === "gif" ? decodeGif(a) : meta.type === "video" ? extractVideo(a) : loadImage(a);
+  const load = meta.type === "gif" ? decodeGif(a) : meta.type === "video" ? extractVideo(a, opts) : loadImage(a);
   a.ready = load.then(changed, (e: Error) => {
     a.error = e.message;
     changed();

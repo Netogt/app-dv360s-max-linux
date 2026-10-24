@@ -3,10 +3,13 @@
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { background as makeBackground, mediaLayer, newProject } from "./defaults";
 import { api, packTheme, unpackTheme } from "./io";
-import { clearAssets, detectType, registerAsset } from "./render/assets";
+import type { Example } from "./examples";
+import { clearAssets, detectType, dropAsset, ensureVideoFrame, getAsset, mediaTime, registerAsset } from "./render/assets";
 import { compileTheme } from "./render/compile";
+import { drawScene } from "./render/draw";
 import { addLayer, curLayers, store, updateLayer } from "./store";
-import type { AssetMeta, BackgroundLayer } from "./types";
+import type { AssetMeta, BackgroundLayer, Project } from "./types";
+import { SIZE } from "./types";
 import { setBusy, toast } from "./ui/feedback";
 import { extOf, formatBytes, uid } from "./util";
 
@@ -30,9 +33,30 @@ export async function importFiles(files: File[], asBackground = false) {
       type,
       file: `${id}.${extOf(file.name)}`,
     };
-    const a = registerAsset(meta, new Uint8Array(await file.arrayBuffer()));
-    await a.ready;
+    let a;
+    if (type === "video") {
+      // o ffmpeg pode levar um tempo: mostra o progresso e deixa cancelar
+      const ac = new AbortController();
+      const label = `Preparando “${file.name}”`;
+      const cancel = () => ac.abort();
+      setBusy({ label, done: 0, total: 0, cancel });
+      a = registerAsset(meta, new Uint8Array(await file.arrayBuffer()), {
+        signal: ac.signal,
+        onProgress: (done, total) => setBusy({ label: `${label} · quadro ${done} de ${total || "?"}`, done, total, cancel }),
+      });
+      await a.ready;
+      setBusy(null);
+      if (ac.signal.aborted) {
+        dropAsset(id);
+        toast("Importação cancelada");
+        continue;
+      }
+    } else {
+      a = registerAsset(meta, new Uint8Array(await file.arrayBuffer()));
+      await a.ready;
+    }
     if (a.error) {
+      dropAsset(id);
       toast(`${file.name}: ${a.error}`, "error");
       continue;
     }
@@ -84,21 +108,58 @@ export async function newDocument() {
   store.load(p, null);
 }
 
-export async function openDocument() {
-  if (!(await confirmDiscard())) return;
-  const path = await open({ multiple: false, directory: false, filters: FILTER });
-  if (typeof path !== "string") return;
+/** Começa um tema novo a partir de um exemplo. */
+export async function newFromExample(ex: Example): Promise<boolean> {
+  if (!(await confirmDiscard())) return false;
+  clearAssets();
+  store.load(ex.make(), null);
+  return true;
+}
+
+let libDir: Promise<string | null> | null = null;
+/** Pasta da biblioteca (~/.config/dv360s-studio/temas). */
+export const libraryDir = () => (libDir ??= api.libraryDir().catch(() => null));
+
+const slug = (name: string) =>
+  (name || "tema")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\- ]+/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .toLowerCase() || "tema";
+
+/** Abre um .dvtheme pelo caminho. */
+export async function openPath(path: string, confirm = true): Promise<boolean> {
+  if (confirm && !(await confirmDiscard())) return false;
   try {
     setBusy({ label: "Abrindo tema", done: 0, total: 0 });
     const bytes = await api.readFile(path);
     clearAssets();
-    store.load(unpackTheme(bytes), path);
+    const p = unpackTheme(bytes);
+    store.load(p, path);
+    // vídeos são preparados de novo pelo ffmpeg: espera para o palco já abrir completo
+    const videos = Object.values(p.assets).filter((m) => m.type === "video");
+    for (const [i, m] of videos.entries()) {
+      setBusy({ label: `Preparando vídeo ${i + 1} de ${videos.length}`, done: i, total: videos.length });
+      await getAsset(m.id)?.ready;
+    }
     toast("Tema aberto", "success");
+    return true;
   } catch (e) {
     toast(errMsg(e), "error");
+    return false;
   } finally {
     setBusy(null);
   }
+}
+
+export async function openDocument() {
+  if (!(await confirmDiscard())) return;
+  const dir = await libraryDir();
+  const path = await open({ multiple: false, directory: false, filters: FILTER, defaultPath: dir ?? undefined });
+  if (typeof path !== "string") return;
+  await openPath(path, false);
 }
 
 /** Compila mostrando o progresso; devolve null se o usuário cancelar. */
@@ -108,11 +169,14 @@ async function compileWithProgress(label: string) {
   store.set({ playing: false });
   setBusy({ label, done: 0, total: 0, cancel: () => ac.abort() });
   try {
-    return await compileTheme(
+    const t0 = performance.now();
+    const out = await compileTheme(
       store.get().project,
       (pr) => setBusy({ label: pr.label, done: pr.done, total: pr.total, cancel: () => ac.abort() }),
       ac.signal,
     );
+    if (out.frames >= 10) saveRenderSpeed((performance.now() - t0) / out.frames, out.bytes / out.frames);
+    return out;
   } catch (e) {
     if ((e as Error).name === "AbortError") toast("Renderização cancelada");
     else toast(`Falha ao renderizar: ${errMsg(e)}`, "error");
@@ -123,25 +187,97 @@ async function compileWithProgress(label: string) {
   }
 }
 
-/** Salva o .dvtheme completo (projeto editável + parte renderizada, pronta para o player). */
+// ---------- estimativa de tempo de renderização ----------
+
+const SPEED_KEY = "dv.renderSpeed";
+
+function saveRenderSpeed(msPerFrame: number, bytesPerFrame: number) {
+  try {
+    localStorage.setItem(SPEED_KEY, JSON.stringify({ msPerFrame, bytesPerFrame }));
+  } catch {
+    // só conveniência
+  }
+}
+
+/** Medida da última renderização (ms e bytes por quadro), se houver. */
+export function renderSpeed(): { msPerFrame: number; bytesPerFrame: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(SPEED_KEY) ?? "null");
+    return v && v.msPerFrame > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------- miniatura ----------
+
+const THUMB = 240;
+
+/** Miniatura da tela principal no instante 0 (vai dentro do .dvtheme, para a biblioteca). */
+export async function makeThumb(p: Project = store.get().project): Promise<Uint8Array | undefined> {
+  const layers = p.screens[0].layers;
+  for (const l of layers) {
+    if ((l.kind === "media" || l.kind === "background") && l.asset) {
+      const a = getAsset(l.asset);
+      if (!a) continue;
+      await a.ready;
+      if (a.meta.type === "video") await ensureVideoFrame(a, mediaTime(a, l, 0));
+    }
+  }
+  const c = document.createElement("canvas");
+  c.width = THUMB;
+  c.height = THUMB;
+  const ctx = c.getContext("2d")!;
+  ctx.scale(THUMB / SIZE, THUMB / SIZE);
+  ctx.imageSmoothingQuality = "high";
+  drawScene(ctx, layers, { t: 0, now: new Date(), mode: "bake" });
+  const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/jpeg", 0.82));
+  return blob ? new Uint8Array(await blob.arrayBuffer()) : undefined;
+}
+
+/** Salva o .dvtheme completo (projeto editável + parte renderizada, pronta para o player).
+ *  Sem caminho, o padrão é a biblioteca, que aparece na lista de temas e na bandeja. */
 export async function saveDocument(saveAs = false) {
   const st = store.get();
   let path = st.filePath;
   if (!path || saveAs) {
-    const chosen = await save({ filters: FILTER, defaultPath: `${st.project.name || "tema"}.dvtheme` });
+    const dir = await libraryDir();
+    const name = `${slug(st.project.name)}.dvtheme`;
+    const chosen = await save({ filters: FILTER, defaultPath: dir ? `${dir}/${name}` : name });
     if (!chosen) return;
     path = chosen.endsWith(".dvtheme") ? chosen : `${chosen}.dvtheme`;
   }
+  await writeDocument(path);
+}
+
+async function writeDocument(path: string): Promise<boolean> {
   const out = await compileWithProgress("Salvando tema");
-  if (!out) return;
+  if (!out) return false;
   try {
-    const bytes = packTheme(store.get().project, out.files);
+    const bytes = packTheme(store.get().project, out.files, await makeThumb());
     await api.writeFile(path, bytes);
     store.set({ filePath: path, dirty: false });
     toast(`Salvo (${formatBytes(bytes.length)})`, "success");
+    return true;
   } catch (e) {
     toast(errMsg(e), "error");
+    return false;
   }
+}
+
+/** Salva direto na biblioteca, sem perguntar onde (um arquivo novo se o nome já existir). */
+export async function saveToLibrary(existing: string[]): Promise<boolean> {
+  const dir = await libraryDir();
+  if (!dir) {
+    toast("Biblioteca indisponível", "error");
+    return false;
+  }
+  const cur = store.get().filePath;
+  if (cur?.startsWith(`${dir}/`)) return writeDocument(cur);
+  const base = slug(store.get().project.name);
+  let path = `${dir}/${base}.dvtheme`;
+  for (let i = 2; existing.includes(path); i++) path = `${dir}/${base}-${i}.dvtheme`;
+  return writeDocument(path);
 }
 
 /** Renderiza e manda para o player (que fica rodando mesmo com o editor fechado). */
@@ -150,7 +286,9 @@ export async function applyToScreen() {
   if (!out) return;
   try {
     const bytes = packTheme(null, out.files);
-    await api.applyTheme(bytes);
+    // se o tema veio da biblioteca e não mudou, ele fica marcado como o que está na tela
+    const st = store.get();
+    await api.applyTheme(bytes, st.dirty ? null : st.filePath);
     const anim = out.frames > 1 ? ` · ${out.frames} quadros` : "";
     toast(`Enviado para a tela (${formatBytes(bytes.length)}${anim})`, "success");
   } catch (e) {

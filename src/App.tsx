@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
-import { applyToScreen, importFiles, loadDraft, openDocument, saveDocument, saveDraft } from "./actions";
+import { applyToScreen, importFiles, loadDraft, saveDocument, saveDraft } from "./actions";
+import { isLive, setLive } from "./live";
 import { curLayers, duplicateLayer, getLayer, moveLayer, nudge, removeLayer, select, store } from "./store";
 import { Inspector } from "./ui/Inspector";
 import { LayersPanel } from "./ui/LayersPanel";
 import { Stage } from "./ui/Stage";
 import { TopBar } from "./ui/TopBar";
 import { BusyModal, Toasts } from "./ui/feedback";
+import { LibraryModal, openLibrary } from "./ui/Library";
+import { ShortcutsModal, toggleShortcuts } from "./ui/Shortcuts";
 import { debounce, isTyping } from "./util";
 
 function useShortcuts() {
@@ -20,7 +23,17 @@ function useShortcuts() {
       }
       if (mod && k === "o") {
         e.preventDefault();
-        openDocument();
+        openLibrary("mine");
+        return;
+      }
+      if (mod && k === "n") {
+        e.preventDefault();
+        openLibrary("examples");
+        return;
+      }
+      if (mod && k === "l") {
+        e.preventDefault();
+        setLive(!isLive());
         return;
       }
       if (mod && e.key === "Enter") {
@@ -63,6 +76,9 @@ function useShortcuts() {
         e.preventDefault();
         const d = e.shiftKey ? 10 : 1;
         nudge(e.key === "ArrowLeft" ? -d : e.key === "ArrowRight" ? d : 0, e.key === "ArrowUp" ? -d : e.key === "ArrowDown" ? d : 0);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        toggleShortcuts();
       } else if (e.key === "Escape") {
         if (st.tool !== "select") store.set({ tool: "select" });
         else select(null);
@@ -77,7 +93,15 @@ function useShortcuts() {
     };
     const onPaste = (e: ClipboardEvent) => {
       if (isTyping(e as unknown as KeyboardEvent)) return;
-      const files = Array.from(e.clipboardData?.files ?? []);
+      let files = Array.from(e.clipboardData?.files ?? []);
+      // imagem copiada de um navegador/visualizador às vezes só vem como item
+      if (!files.length) {
+        files = Array.from(e.clipboardData?.items ?? [])
+          .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+          .map((it) => it.getAsFile())
+          .filter((f): f is File => !!f)
+          .map((f) => (f.name && f.name !== "image" ? f : new File([f], `colado.${f.type.split("/")[1] || "png"}`, { type: f.type })));
+      }
       if (files.length) {
         e.preventDefault();
         importFiles(files);
@@ -131,6 +155,8 @@ export default function App() {
         {ready ? <Stage /> : <main className="stage-area" />}
         <Inspector />
       </div>
+      <LibraryModal />
+      <ShortcutsModal />
       <Toasts />
       <BusyModal />
     </div>
