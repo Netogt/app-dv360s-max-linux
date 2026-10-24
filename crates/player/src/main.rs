@@ -4,12 +4,15 @@
 //!   minuto); no resto do tempo manda um CONNECT a cada 4 s para o watchdog não estourar.
 //! - Recarrega sozinho o tema e o `player.json` quando o editor os regrava.
 //! - Se o cooler reiniciar ou for desconectado, espera ele voltar e reabre.
+//! - Prévia ao vivo: enquanto o editor espelha, mostra os quadros que ele manda pelo socket
+//!   (`dv360s_core::live`) e volta ao tema quando ele para.
 //! - SIGTERM/SIGINT: envia CLE (a tela volta ao logo) e sai.
 //!
 //! Uso: dv360s-player [arquivo.dvtheme]   (padrão: ~/.config/dv360s-studio/active.dvtheme)
 //!      dv360s-player --snapshot saida.jpg [arquivo.dvtheme] [quadro] [tela]   (renderiza sem o cooler)
 //!      dv360s-player --sensores                                         (temperaturas detectadas)
 
+use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -17,6 +20,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chrono::{Local, Timelike};
 use dv360s_core::device::{DevError, Display};
+use dv360s_core::live;
 use dv360s_core::paths::{self, PlayerConfig, PlayerStatus};
 use dv360s_core::render::{self, Theme, RGB_LEN};
 use dv360s_core::sensors::{Readings, Sensors};
@@ -50,6 +54,56 @@ impl Status {
             }
             let _ = paths::write_atomic(&paths::player_status(), &serde_json::to_vec(&next).unwrap_or_default());
             self.cur = next;
+        }
+    }
+}
+
+/// Prévia ao vivo vinda do editor (ver `dv360s_core::live`). As esperas do laço principal são
+/// feitas aqui: um quadro novo do editor acorda o player na hora.
+struct Live {
+    sock: Option<UnixDatagram>,
+    buf: Vec<u8>,
+    frame: Option<Vec<u8>>,
+    at: Instant,
+    /// quadro novo ainda não enviado
+    dirty: bool,
+    /// acabou de sair da prévia (o tema precisa ser reenviado)
+    ended: bool,
+}
+
+impl Live {
+    fn active(&self) -> bool {
+        self.frame.is_some()
+    }
+
+    /// Espera até `dur` ou até chegar uma mensagem do editor.
+    fn wait(&mut self, dur: Duration) {
+        let Some(sock) = &self.sock else {
+            std::thread::sleep(dur);
+            return;
+        };
+        let _ = sock.set_read_timeout(Some(dur.max(Duration::from_millis(1))));
+        let Ok(n) = sock.recv(&mut self.buf) else { return };
+        match self.buf.first().copied() {
+            Some(live::FRAME) if n > 1 => {
+                if self.frame.is_none() {
+                    log("prévia ao vivo do editor");
+                }
+                self.frame = Some(self.buf[1..n].to_vec());
+                self.at = Instant::now();
+                self.dirty = true;
+            }
+            Some(live::PING) if self.frame.is_some() => self.at = Instant::now(),
+            Some(live::END) => self.stop(),
+            _ => {}
+        }
+    }
+
+    fn stop(&mut self) {
+        if self.frame.take().is_some() {
+            log("fim da prévia ao vivo");
+            self.dirty = false;
+            self.ended = true;
         }
     }
 }
@@ -134,6 +188,8 @@ fn main() {
     let mut sensors: Option<Sensors> = None;
     let mut sens = Readings::default();
     let mut sens_at = Instant::now() - Duration::from_secs(10);
+    let sock = live::bind().map_err(|e| log(format!("prévia ao vivo indisponível: {e}"))).ok();
+    let mut live = Live { sock, buf: vec![0u8; 128 * 1024], frame: None, at: Instant::now(), dirty: false, ended: false };
 
     log(format!("tema: {}", theme_path.display()));
 
@@ -172,38 +228,74 @@ fn main() {
             }
         }
 
-        let Some(t) = theme.as_mut() else {
+        if live.active() && live.at.elapsed() > live::TIMEOUT {
+            live.stop();
+        }
+        if live.ended {
+            // saiu da prévia ao vivo: o tema precisa ser reenviado
+            live.ended = false;
+            last_key = None;
+        }
+        let name = if live.active() {
+            "Prévia ao vivo".to_string()
+        } else if let Some(t) = &theme {
+            t.name.clone()
+        } else {
             disp.close();
             if status.cur.state != "error" {
                 status.set("no_theme", "nenhum tema aplicado", "");
             }
-            std::thread::sleep(Duration::from_millis(500));
+            live.wait(Duration::from_millis(500));
             continue;
         };
 
         // 2) dispositivo
         if !disp.is_open() {
             if Instant::now() < retry_at {
-                std::thread::sleep(Duration::from_millis(250));
+                live.wait(Duration::from_millis(250));
                 continue;
             }
             match disp.open() {
                 Ok(()) => {
                     log("cooler conectado");
                     last_key = None;
+                    live.dirty = live.active();
                 }
                 Err(e) => {
                     let state = match e {
                         DevError::NoPermission => "no_permission",
                         _ => "waiting_device",
                     };
-                    status.set(state, e.to_string(), &t.name);
+                    status.set(state, e.to_string(), &name);
                     retry_at = Instant::now() + Duration::from_secs(2);
                     continue;
                 }
             }
         }
-        status.set("playing", "", &t.name);
+        status.set("playing", "", &name);
+
+        // prévia ao vivo: o editor já manda o JPEG pronto (e girado)
+        if let Some(frame) = live.frame.as_ref().filter(|_| live.active()) {
+            let result = if live.dirty {
+                disp.send_jpeg(frame)
+            } else if disp.keepalive_due() {
+                disp.keepalive()
+            } else {
+                Ok(())
+            };
+            match result {
+                Ok(()) => live.dirty = false,
+                Err(e) => {
+                    status.set("waiting_device", format!("{e}; reabrindo"), &name);
+                    disp.close();
+                    retry_at = Instant::now() + Duration::from_millis(500);
+                    continue;
+                }
+            }
+            live.wait(Duration::from_secs(1));
+            continue;
+        }
+        let Some(t) = theme.as_mut() else { continue };
 
         // 3) quadro
         let now = Local::now();
@@ -265,11 +357,12 @@ fn main() {
             let ms_into_second = now.nanosecond() as u64 / 1_000_000 % 1000;
             Duration::from_millis(1000 - ms_into_second + 5)
         };
-        std::thread::sleep(wait.min(Duration::from_secs(1)));
+        live.wait(wait.min(Duration::from_secs(1)));
     }
 
     log("encerrando (CLE)");
     disp.close();
+    let _ = std::fs::remove_file(paths::live_socket());
     let _ = std::fs::remove_file(paths::player_pid());
     status.set("stopped", "", "");
 }
