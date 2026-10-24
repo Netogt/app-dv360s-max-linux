@@ -1,14 +1,18 @@
 //! Comandos do editor. O editor nunca abre o USB: quem fala com o cooler é sempre o
-//! `dv360s-player`, e o editor só grava o tema/configuração e controla o processo.
+//! `dv360s-player`; o editor grava o tema/configuração, controla o processo e, na prévia ao
+//! vivo, manda quadros prontos para ele pelo socket.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 use dv360s_core::paths::{self, PlayerConfig, PlayerStatus};
+use dv360s_core::{library, live, service};
 use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request, Response};
+use tauri::{AppHandle, Emitter};
 
-const SERVICE: &str = "dv360s-player.service";
 const UDEV_RULE: &str = "/etc/udev/rules.d/99-dv360s.rules";
 
 fn percent_decode(s: &str) -> String {
@@ -63,91 +67,24 @@ fn load_draft() -> Response {
 }
 
 /// Grava o tema ativo (o player recarrega sozinho) e garante que o player está rodando.
+/// `x-path`: o arquivo da biblioteca de onde ele veio, se for o caso.
 #[tauri::command]
 fn apply_theme(request: Request<'_>) -> Result<(), String> {
-    let (data, _) = raw_request(&request)?;
+    let (data, source) = raw_request(&request)?;
     paths::write_atomic(&paths::active_theme(), data).map_err(|e| e.to_string())?;
-    start_player()
-}
-
-fn player_bin() -> Option<PathBuf> {
-    let name = "dv360s-player";
-    let mut candidates = Vec::new();
-    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
-        candidates.push(dir.join(name));
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        candidates.push(PathBuf::from(home).join(".local/bin").join(name));
-    }
-    if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&path).map(|d| d.join(name)));
-    }
-    candidates.into_iter().find(|p| p.is_file())
-}
-
-fn unit_path() -> PathBuf {
-    paths::config_dir().parent().unwrap_or(Path::new(".")).join("systemd/user").join(SERVICE)
-}
-
-fn systemctl(args: &[&str]) -> Result<String, String> {
-    let out = Command::new("systemctl")
-        .arg("--user")
-        .args(args)
-        .output()
-        .map_err(|e| format!("systemctl: {e}"))?;
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if out.status.success() {
-        Ok(text)
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
-}
-
-fn autostart_enabled() -> bool {
-    unit_path().is_file() && systemctl(&["is-enabled", SERVICE]).is_ok()
-}
-
-fn kill_manual_player() {
-    if let Some(pid) = paths::running_player_pid() {
-        let _ = Command::new("kill").arg(pid.to_string()).status();
-        for _ in 0..30 {
-            if !paths::pid_is_player(pid) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-    }
+    let source = source.map(PathBuf::from).filter(|p| library::contains(p));
+    library::set_active_source(source.as_deref());
+    service::start_player()
 }
 
 #[tauri::command]
 fn start_player() -> Result<(), String> {
-    if paths::running_player_pid().is_some() {
-        return Ok(());
-    }
-    if autostart_enabled() {
-        return systemctl(&["start", SERVICE]).map(|_| ());
-    }
-    let bin = player_bin().ok_or("dv360s-player não encontrado (rode scripts/install.sh ou cargo build)")?;
-    std::fs::create_dir_all(paths::config_dir()).map_err(|e| e.to_string())?;
-    let log = std::fs::File::create(paths::config_dir().join("player.log")).map_err(|e| e.to_string())?;
-    let mut cmd = Command::new(bin);
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(log);
-    #[cfg(unix)]
-    {
-        // grupo próprio: o player continua vivo quando o editor é fechado
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-    cmd.spawn().map(|_| ()).map_err(|e| format!("não foi possível iniciar o player: {e}"))
+    service::start_player()
 }
 
 #[tauri::command]
-fn stop_player() -> Result<(), String> {
-    if autostart_enabled() {
-        let _ = systemctl(&["stop", SERVICE]);
-    }
-    kill_manual_player();
-    Ok(())
+fn stop_player() {
+    service::stop_player();
 }
 
 #[derive(Serialize)]
@@ -160,12 +97,15 @@ struct StatusOut {
     udev_rule: bool,
     autostart: bool,
     player_found: bool,
+    tray_running: bool,
+    tray_autostart: bool,
+    tray_found: bool,
     config: PlayerConfig,
 }
 
 #[tauri::command]
 async fn player_status() -> StatusOut {
-    let running = paths::running_player_pid().is_some();
+    let running = service::player_running();
     let mut status: PlayerStatus = std::fs::read(paths::player_status())
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -178,8 +118,11 @@ async fn player_status() -> StatusOut {
         status,
         device_present: dv360s_core::device::present(),
         udev_rule: Path::new(UDEV_RULE).is_file() || Path::new("/usr/lib/udev/rules.d/99-dv360s.rules").is_file(),
-        autostart: autostart_enabled(),
-        player_found: player_bin().is_some(),
+        autostart: service::autostart_enabled(service::PLAYER),
+        player_found: service::find_bin(service::PLAYER).is_some(),
+        tray_running: service::tray_running(),
+        tray_autostart: service::autostart_enabled(service::TRAY),
+        tray_found: service::find_bin(service::TRAY).is_some(),
         config: PlayerConfig::load(),
     }
 }
@@ -193,23 +136,89 @@ fn set_player_config(config: PlayerConfig) -> Result<(), String> {
 /// Liga/desliga o serviço de usuário do systemd que inicia o player com a sessão.
 #[tauri::command]
 fn set_autostart(enabled: bool) -> Result<(), String> {
-    if !enabled {
-        let _ = systemctl(&["disable", "--now", SERVICE]);
-        let _ = std::fs::remove_file(unit_path());
-        let _ = systemctl(&["daemon-reload"]);
-        return Ok(());
+    service::set_autostart(service::PLAYER, enabled)
+}
+
+/// Ícone na bandeja: liga (e passa a iniciar com a sessão) ou desliga.
+#[tauri::command]
+fn set_tray(enabled: bool) -> Result<(), String> {
+    if enabled {
+        service::set_autostart(service::TRAY, true).or_else(|_| service::start_tray())
+    } else {
+        let _ = service::set_autostart(service::TRAY, false);
+        service::stop_tray();
+        Ok(())
     }
-    let bin = player_bin().ok_or("dv360s-player não encontrado")?;
-    let unit = format!(
-        "[Unit]\nDescription=DV360S Studio - tela do water cooler\nAfter=default.target\n\n\
-         [Service]\nExecStart=\"{}\"\nRestart=on-failure\nRestartSec=3\n\n\
-         [Install]\nWantedBy=default.target\n",
-        bin.display()
-    );
-    paths::write_atomic(&unit_path(), unit.as_bytes()).map_err(|e| e.to_string())?;
-    kill_manual_player();
-    systemctl(&["daemon-reload"])?;
-    systemctl(&["enable", "--now", SERVICE]).map(|_| ())
+}
+
+// ---------- biblioteca ----------
+
+#[tauri::command]
+fn library_dir() -> Result<String, String> {
+    let dir = paths::library_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn library_list() -> Vec<library::LibTheme> {
+    library::list()
+}
+
+#[tauri::command]
+async fn library_thumb(path: String) -> Response {
+    Response::new(library::thumb(Path::new(&path)).unwrap_or_default())
+}
+
+#[tauri::command]
+async fn library_apply(path: String) -> Result<(), String> {
+    library::apply(Path::new(&path))
+}
+
+#[tauri::command]
+fn library_delete(path: String) -> Result<(), String> {
+    library::remove(Path::new(&path))
+}
+
+// ---------- prévia ao vivo ----------
+
+/// Quadro da prévia (RGBA 480×480) → girado como o player gira → JPEG → player.
+/// Cabeçalho `x-q`: qualidade JPEG do tema.
+#[tauri::command]
+async fn live_frame(request: Request<'_>) -> Result<(), String> {
+    use dv360s_core::render::{encode_jpeg, rotate_rgb, RGB_LEN};
+    let (data, _) = raw_request(&request)?;
+    if data.len() != RGB_LEN / 3 * 4 {
+        return Err("quadro com tamanho inválido".into());
+    }
+    if !service::player_running() {
+        // o primeiro quadro se perde; os próximos já chegam
+        return service::start_player();
+    }
+    let q: u8 = request.headers().get("x-q").and_then(|v| v.to_str().ok()?.parse().ok()).unwrap_or(85);
+    let mut rgb = Vec::with_capacity(RGB_LEN);
+    for px in data.chunks_exact(4) {
+        rgb.extend_from_slice(&px[..3]);
+    }
+    let rotation = PlayerConfig::load().rotation;
+    if rotation != 0 {
+        let mut out = vec![0u8; RGB_LEN];
+        rotate_rgb(&rgb, &mut out, rotation);
+        rgb = out;
+    }
+    let jpeg = encode_jpeg(&rgb, q)?;
+    live::send(live::FRAME, &jpeg)
+}
+
+/// Nada mudou na prévia, mas o editor continua espelhando.
+#[tauri::command]
+fn live_ping() -> Result<(), String> {
+    live::send(live::PING, &[])
+}
+
+#[tauri::command]
+fn live_end() {
+    let _ = live::send(live::END, &[]);
 }
 
 /// Instala a regra udev (pede a senha pelo polkit) para usar o USB sem root.
@@ -230,15 +239,47 @@ async fn install_udev_rule() -> Result<(), String> {
     }
 }
 
+/// Importações de vídeo canceladas pelo usuário (por id).
+fn cancelled() -> &'static Mutex<HashSet<String>> {
+    static C: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+#[tauri::command]
+fn cancel_video(id: String) {
+    if let Ok(mut c) = cancelled().lock() {
+        c.insert(id);
+    }
+}
+
+#[derive(Serialize, Clone)]
+struct VideoProgress<'a> {
+    id: &'a str,
+    done: usize,
+    total: usize,
+}
+
+/// Duração do vídeo em segundos (ffprobe vem junto com o ffmpeg).
+fn probe_duration(file: &Path) -> Option<f32> {
+    let out = Command::new("ffprobe")
+        .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"])
+        .arg(file)
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
 /// Quadros de um vídeo, decodificados pelo ffmpeg. O <video> do WebKitGTK não serve: neste
 /// sistema ele decodifica, mas os quadros não chegam ao canvas (saem pretos), e sem os plugins
-/// do GStreamer ele derruba a página. Corpo: bytes do vídeo; cabeçalhos `x-ext`, `x-fps`,
-/// `x-max` (segundos). Resposta: u32 n + n × (u32 tamanho + JPEG), little-endian.
+/// do GStreamer ele derruba a página. Corpo: bytes do vídeo; cabeçalhos `x-id`, `x-ext`,
+/// `x-fps`, `x-max` (segundos). O progresso sai no evento `video-progress`.
+/// Resposta: u32 n + n × (u32 tamanho + JPEG), little-endian.
 #[tauri::command]
-async fn extract_video(request: Request<'_>) -> Result<Response, String> {
+async fn extract_video(app: AppHandle, request: Request<'_>) -> Result<Response, String> {
     let (data, _) = raw_request(&request)?;
     let data = data.to_vec();
     let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let id = header("x-id").unwrap_or_default();
     let ext: String = header("x-ext").unwrap_or_else(|| "mp4".into()).chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
     let fps: f32 = header("x-fps").and_then(|v| v.parse::<f32>().ok()).unwrap_or(20.0).clamp(1.0, 60.0);
     let max: f32 = header("x-max").and_then(|v| v.parse::<f32>().ok()).unwrap_or(120.0).clamp(1.0, 600.0);
@@ -247,67 +288,106 @@ async fn extract_video(request: Request<'_>) -> Result<Response, String> {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let tmp = std::env::temp_dir().join(format!("dv360s-video-{}-{nanos}.{ext}", std::process::id()));
         std::fs::write(&tmp, &data).map_err(|e| e.to_string())?;
-        let out = Command::new("ffmpeg")
-            .args(["-v", "error", "-nostdin", "-i"])
-            .arg(&tmp)
-            .args([
-                "-an",
-                "-t",
-                &max.to_string(),
-                "-vf",
-                &format!("fps={fps},scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease"),
-                "-c:v",
-                "mjpeg",
-                "-q:v",
-                "3",
-                "-f",
-                "image2pipe",
-                "pipe:1",
-            ])
-            .output();
+        drop(data);
+        let result = run_ffmpeg(&app, &id, &tmp, fps, max);
         let _ = std::fs::remove_file(&tmp);
-        let out = out.map_err(|e| {
+        if let Ok(mut c) = cancelled().lock() {
+            c.remove(&id);
+        }
+        result.map(Response::new)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn run_ffmpeg(app: &AppHandle, id: &str, file: &Path, fps: f32, max: f32) -> Result<Vec<u8>, String> {
+    let total = probe_duration(file).map_or(0, |d| (d.min(max) * fps).ceil() as usize);
+    let mut child = Command::new("ffmpeg")
+        .args(["-v", "error", "-nostdin", "-i"])
+        .arg(file)
+        .args([
+            "-an",
+            "-t",
+            &max.to_string(),
+            "-vf",
+            &format!("fps={fps},scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease"),
+            "-c:v",
+            "mjpeg",
+            "-q:v",
+            "3",
+            "-f",
+            "image2pipe",
+            "pipe:1",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 "Para usar vídeo, instale o ffmpeg: sudo pacman -S ffmpeg".to_string()
             } else {
                 format!("ffmpeg: {e}")
             }
         })?;
-        // o mjpeg do ffmpeg é uma sequência de JPEGs completos (FFD8 ... FFD9)
-        let mut frames: Vec<&[u8]> = Vec::new();
-        let buf = &out.stdout;
-        let mut start = 0;
-        let mut i = 2;
-        while i + 1 < buf.len() {
-            if buf[i] == 0xFF && buf[i + 1] == 0xD9 {
-                frames.push(&buf[start..i + 2]);
-                start = i + 2;
-                i = start + 2;
+    let mut stderr = child.stderr.take().expect("stderr");
+    let err_reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = std::io::Read::read_to_string(&mut stderr, &mut s);
+        s
+    });
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    // o mjpeg do ffmpeg é uma sequência de JPEGs completos (FFD8 ... FFD9)
+    let mut buf: Vec<u8> = Vec::new();
+    let mut frames: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0;
+    let mut scan = 2;
+    let mut chunk = vec![0u8; 256 * 1024];
+    let mut last_emit = std::time::Instant::now();
+    loop {
+        if cancelled().lock().is_ok_and(|c| c.contains(id)) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("importação cancelada".into());
+        }
+        let n = std::io::Read::read(&mut stdout, &mut chunk).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        while scan + 1 < buf.len() {
+            if buf[scan] == 0xFF && buf[scan + 1] == 0xD9 {
+                frames.push((start, scan + 2));
+                start = scan + 2;
+                scan = start + 2;
             } else {
-                i += 1;
+                scan += 1;
             }
         }
-        if frames.is_empty() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("não foi possível ler o vídeo: {}", err.lines().last().unwrap_or("formato desconhecido")));
+        if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
+            last_emit = std::time::Instant::now();
+            let _ = app.emit("video-progress", VideoProgress { id, done: frames.len(), total: total.max(frames.len()) });
         }
-        let mut res = Vec::with_capacity(buf.len() + frames.len() * 4 + 4);
-        res.extend_from_slice(&(frames.len() as u32).to_le_bytes());
-        for f in frames {
-            res.extend_from_slice(&(f.len() as u32).to_le_bytes());
-            res.extend_from_slice(f);
-        }
-        Ok(Response::new(res))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }
+    let _ = child.wait();
+    let err = err_reader.join().unwrap_or_default();
+    if frames.is_empty() {
+        return Err(format!("não foi possível ler o vídeo: {}", err.lines().last().unwrap_or("formato desconhecido")));
+    }
+    let mut res = Vec::with_capacity(buf.len() + frames.len() * 4 + 4);
+    res.extend_from_slice(&(frames.len() as u32).to_le_bytes());
+    for (a, b) in frames {
+        res.extend_from_slice(&((b - a) as u32).to_le_bytes());
+        res.extend_from_slice(&buf[a..b]);
+    }
+    Ok(res)
 }
 
 /// Temperaturas atuais, para a prévia das camadas de sensor.
 #[tauri::command]
 async fn read_sensors() -> dv360s_core::sensors::Readings {
     use dv360s_core::sensors::Sensors;
-    use std::sync::{Mutex, OnceLock};
     // um só leitor: o uso da CPU é a diferença entre leituras consecutivas
     static SENSORS: OnceLock<Mutex<Sensors>> = OnceLock::new();
     let m = SENSORS.get_or_init(|| Mutex::new(Sensors::discover()));
@@ -348,6 +428,16 @@ pub fn run() {
             player_status,
             set_player_config,
             set_autostart,
+            set_tray,
+            library_dir,
+            library_list,
+            library_thumb,
+            library_apply,
+            library_delete,
+            live_frame,
+            live_ping,
+            live_end,
+            cancel_video,
             install_udev_rule,
             read_sensors,
             extract_video,
