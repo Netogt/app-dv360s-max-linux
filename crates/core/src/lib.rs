@@ -4,12 +4,15 @@
 //! interrupt OUT, em pacotes de 1024 bytes. Ver `dv360s-max/Engenharia-reversa-water-coole.md`.
 
 pub mod device;
+pub mod library;
+pub mod live;
 pub mod pack;
 pub mod paths;
 pub mod protocol;
 pub mod render;
 pub mod rules;
 pub mod sensors;
+pub mod service;
 pub mod theme;
 
 /// Lado da tela em pixels (a tela é quadrada).

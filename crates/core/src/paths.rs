@@ -33,6 +33,25 @@ pub fn draft() -> PathBuf {
     config_dir().join("rascunho.dvtheme")
 }
 
+/// Pasta da biblioteca de temas (os `.dvtheme` completos que o usuário salvou).
+pub fn library_dir() -> PathBuf {
+    config_dir().join("temas")
+}
+
+/// Caminho, na biblioteca, do tema que está ativo (para marcá-lo na lista e na bandeja).
+pub fn active_source() -> PathBuf {
+    config_dir().join("active-source")
+}
+
+/// Socket por onde o editor manda a prévia ao vivo para o player.
+pub fn live_socket() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .map(|d| d.join("dv360s-live.sock"))
+        .unwrap_or_else(|| config_dir().join("live.sock"))
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct PlayerConfig {
