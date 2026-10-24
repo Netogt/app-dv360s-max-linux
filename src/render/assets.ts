@@ -57,7 +57,7 @@ const changed = () => listeners.forEach((l) => l());
 
 export function detectType(mime: string, name: string): AssetType | null {
   if (mime === "image/gif" || /\.gif$/i.test(name)) return "gif";
-  if (mime.startsWith("video/") || /\.(mp4|webm|mkv|mov|m4v|ogv)$/i.test(name)) return "video";
+  if (mime.startsWith("video/") || /\.(mp4|webm|mkv|mov|m4v|ogv|avi|wmv|flv|mpe?g|ts)$/i.test(name)) return "video";
   if (mime.startsWith("image/") || /\.(png|jpe?g|webp|bmp|svg|avif)$/i.test(name)) return "image";
   return null;
 }

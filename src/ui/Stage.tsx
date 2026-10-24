@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { dragHasFiles, droppedFiles, importFiles } from "../actions";
 import { drawingLayer } from "../defaults";
 import { liveFrame, useLive } from "../live";
+import { useDropZone } from "../nativeDrop";
 import { onAssetsChanged } from "../render/assets";
 import { drawScene, isAnimated } from "../render/draw";
 import { setSimulated, useSimulated, watchSensors } from "../render/sensors";
@@ -90,7 +90,7 @@ export function Stage() {
   const [fit, setFit] = useState(520);
   const [hover, setHover] = useState<string | null>(null);
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
-  const [drop, setDrop] = useState<null | "layer" | "bg">(null);
+  const drop = useDropZone();
   const [assetsTick, setAssetsTick] = useState(0);
 
   const live = useLive();
@@ -349,22 +349,6 @@ export function Stage() {
     }
   };
 
-  // arrastar arquivos do sistema
-  const hasFiles = (e: React.DragEvent) => dragHasFiles(e.dataTransfer);
-  const onDragOver = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    const zone = (e.target as HTMLElement).closest<HTMLElement>("[data-zone]")?.dataset.zone as "layer" | "bg" | undefined;
-    setDrop(zone ?? "layer");
-  };
-  const onDrop = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    const zone = (e.target as HTMLElement).closest<HTMLElement>("[data-zone]")?.dataset.zone ?? drop;
-    setDrop(null);
-    droppedFiles(e.dataTransfer).then((files) => importFiles(files, zone === "bg"));
-  };
-
   const setZoom = (z: number | "fit") => store.set({ zoom: z });
   const zoomPct = Math.round(scale * 100);
   const stepZoom = (dir: number) => {
@@ -378,11 +362,6 @@ export function Stage() {
     <main
       className="stage-area"
       ref={areaRef}
-      onDragOver={onDragOver}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrop(null);
-      }}
-      onDrop={onDrop}
       onWheel={(e) => {
         if (e.ctrlKey) {
           e.preventDefault();
