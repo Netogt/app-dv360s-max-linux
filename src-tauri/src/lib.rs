@@ -11,7 +11,7 @@ use dv360s_core::paths::{self, PlayerConfig, PlayerStatus};
 use dv360s_core::{library, live, service};
 use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request, Response};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 const UDEV_RULE: &str = "/etc/udev/rules.d/99-dv360s.rules";
 
@@ -416,6 +416,14 @@ async fn list_fonts() -> Vec<String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // abrir de novo (ícone da bandeja, menu de apps) só traz a janela que já está aberta
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_file,

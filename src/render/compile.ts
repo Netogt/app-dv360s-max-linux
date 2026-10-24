@@ -209,6 +209,7 @@ export async function compileTheme(
     fps: p.fps,
     quality: p.quality,
     hold: p.hold,
+    hysteresis: p.hysteresis ?? 0,
     screens,
   };
   files["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest));

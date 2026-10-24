@@ -71,7 +71,13 @@ pub fn spawn_detached(bin: &Path, args: &[&str], log: Option<&Path>) -> Result<(
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn().map(|_| ()).map_err(|e| format!("não foi possível iniciar {}: {e}", bin.display()))
+    let mut child = cmd.spawn().map_err(|e| format!("não foi possível iniciar {}: {e}", bin.display()))?;
+    // recolhe o processo quando ele terminar (senão fica "defunct" enquanto quem abriu viver,
+    // como a bandeja, que roda o tempo todo)
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 fn kill_manual_player() {

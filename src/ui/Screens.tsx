@@ -299,8 +299,8 @@ export function ScreenSettings() {
             <button type="button" className="btn small" onClick={() => addRule("sensor")}>Sensor</button>
           </div>
           <p className="note">
-            Prioridade {priority}: se mais de uma tela valer ao mesmo tempo, aparece a mais à esquerda. Temperaturas têm
-            folga de 2 °C para não ficar trocando perto do limite.
+            Prioridade {priority}: se mais de uma tela valer ao mesmo tempo, aparece a mais à esquerda. A tela sai assim que
+            a condição deixa de valer (ajuste a folga em Tema).
           </p>
         </>
       )}

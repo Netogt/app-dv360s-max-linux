@@ -7,6 +7,7 @@ import { api } from "../io";
 import { getAsset, loopDuration, onAssetsChanged, type RuntimeAsset } from "../render/assets";
 import { estimateFrames } from "../render/compile";
 import { liveReadings, watchSensors } from "../render/sensors";
+import { rulesUseSensors } from "../render/rules";
 import { TOKEN_HELP, usesSensors } from "../render/text";
 import { curLayers, curScreen, store, updateLayer, updateProject, useStore } from "../store";
 import { ScreenSettings, SensorSimulator } from "./Screens";
@@ -160,6 +161,20 @@ function ThemeSettings() {
         {p.screens.length > 1 && (
           <Row label="Troca mín." hint="Tempo mínimo em cada tela antes de trocar de novo (evita ficar piscando).">
             <Slider value={p.hold} min={0} max={60} onChange={(v) => updateProject({ hold: v }, "hold")} format={(v) => `${v} s`} />
+          </Row>
+        )}
+        {rulesUseSensors(p) && (
+          <Row
+            label="Folga"
+            hint="Para telas por temperatura/uso: quanto o valor precisa cair (ou subir) além do limite para a tela sair. Com 0, uma tela de “≥ 60” sai quando mostrar 59."
+          >
+            <Slider
+              value={p.hysteresis ?? 0}
+              min={0}
+              max={10}
+              onChange={(v) => updateProject({ hysteresis: v }, "hyst")}
+              format={(v) => (v ? `${v}` : "nenhuma")}
+            />
           </Row>
         )}
       </Section>

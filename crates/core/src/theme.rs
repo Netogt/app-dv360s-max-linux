@@ -25,6 +25,10 @@ pub struct Manifest {
     /// segundos mínimos numa tela antes de trocar de novo
     #[serde(default = "default_hold")]
     pub hold: f32,
+    /// folga (°C ou %) para uma tela de sensor já ativa sair: com 0 ela sai assim que o valor
+    /// (arredondado, como aparece na tela) deixa de cumprir a condição
+    #[serde(default)]
+    pub hysteresis: f32,
     /// v1
     #[serde(default)]
     pub segments: Vec<SegmentSpec>,

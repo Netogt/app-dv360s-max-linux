@@ -23,6 +23,7 @@ pub struct Theme {
     active: usize,
     switched: Option<Instant>,
     hold: Duration,
+    hysteresis: f32,
 }
 
 struct Screen {
@@ -92,6 +93,7 @@ impl Theme {
             active: 0,
             switched: None,
             hold: Duration::from_secs_f32(m.hold.clamp(0.0, 3600.0)),
+            hysteresis: m.hysteresis.clamp(0.0, 50.0),
         })
     }
 
@@ -119,7 +121,8 @@ impl Theme {
         let next = (1..self.screens.len())
             .find(|&i| {
                 let s = &self.screens[i];
-                rules::screen_ok(&s.rules, s.any, now, sens, i == self.active)
+                let margin = if i == self.active { self.hysteresis } else { 0.0 };
+                rules::screen_ok(&s.rules, s.any, now, sens, margin)
             })
             .unwrap_or(0);
         if next == self.active || self.switched.is_some_and(|t| t.elapsed() < self.hold) {

@@ -149,6 +149,8 @@ export interface Project {
   maxDuration: number;
   /** segundos mínimos em cada tela antes de trocar de novo */
   hold: number;
+  /** folga (°C ou %) para uma tela de sensor já ativa sair; 0 = sai assim que deixa de valer */
+  hysteresis?: number;
   /** [0] é a tela principal: aparece quando nenhuma outra vale. As outras, por prioridade. */
   screens: Screen[];
   assets: Record<string, AssetMeta>;

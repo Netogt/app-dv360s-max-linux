@@ -1,5 +1,6 @@
 // Condições das telas — mesma lógica de crates/core/src/rules.rs (sem a folga e o tempo
 // mínimo, que só fazem sentido no player). Usado para mostrar qual tela vale agora.
+// Sensores são comparados arredondados, como aparecem na tela.
 
 import type { Project, Rule, Screen, SensorName } from "../types";
 import type { Readings } from "./text";
@@ -46,8 +47,9 @@ export function ruleOk(r: Rule, now: Date, sens: Readings): boolean {
       return a != null && b != null && inWrapped((now.getMonth() + 1) * 100 + now.getDate(), a, b, true);
     }
     case "sensor": {
-      const v = sens[r.sensor];
-      if (v == null) return false;
+      const raw = sens[r.sensor];
+      if (raw == null) return false;
+      const v = Math.round(raw);
       return r.op === "<=" ? v <= r.value : v >= r.value;
     }
   }
