@@ -12,12 +12,13 @@ RULE=/etc/udev/rules.d/99-dv360s.rules
 echo "==> Dependências do frontend"
 npm install --no-audit --no-fund
 
-echo "==> Compilando o player e o editor (release)"
-cargo build --release -p dv360s-player
+echo "==> Compilando o player, a bandeja e o editor (release)"
+cargo build --release -p dv360s-player -p dv360s-tray
 npx tauri build --no-bundle
 
 echo "==> Instalando em $BIN"
 install -Dm755 target/release/dv360s-player "$BIN/dv360s-player"
+install -Dm755 target/release/dv360s-tray "$BIN/dv360s-tray"
 install -Dm755 target/release/dv360s-studio "$BIN/dv360s-studio"
 install -Dm644 src-tauri/icons/128x128@2x.png "$ICONS/dv360s-studio.png"
 mkdir -p "$APPS"
@@ -40,9 +41,11 @@ if [ ! -f "$RULE" ]; then
 fi
 
 # se o serviço já estiver ativo, reinicia com o binário novo
-if systemctl --user is-active --quiet dv360s-player.service 2>/dev/null; then
-  systemctl --user restart dv360s-player.service
-fi
+for svc in dv360s-player dv360s-tray; do
+  if systemctl --user is-active --quiet "$svc.service" 2>/dev/null; then
+    systemctl --user restart "$svc.service"
+  fi
+done
 
 echo
 echo "Pronto. Abra o \"DV360S Studio\" pelo menu de aplicativos (ou rode dv360s-studio)."
