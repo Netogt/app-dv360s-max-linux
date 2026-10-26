@@ -119,13 +119,15 @@ function fmt(v: number, step: number) {
   return Number(v.toFixed(dec)).toString();
 }
 
-export function Slider({ value, onChange, min, max, step = 1, format }: {
+export function Slider({ value, onChange, min, max, step = 1, format, editable }: {
   value: number;
   onChange: (v: number) => void;
   min: number;
   max: number;
   step?: number;
   format?: (v: number) => string;
+  /** campo para digitar o valor no lugar do rótulo (o sufixo é a unidade, ex.: "%") */
+  editable?: { suffix?: string; step?: number };
 }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
@@ -139,7 +141,11 @@ export function Slider({ value, onChange, min, max, step = 1, format }: {
         style={{ "--pct": `${pct}%` } as React.CSSProperties}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
       />
-      <span className="slider-value">{format ? format(value) : value}</span>
+      {editable ? (
+        <NumberField value={value} min={min} max={max} step={editable.step ?? 1} suffix={editable.suffix} onChange={onChange} />
+      ) : (
+        <span className="slider-value">{format ? format(value) : value}</span>
+      )}
     </div>
   );
 }

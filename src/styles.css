@@ -1014,7 +1014,7 @@ button:disabled {
   gap: 10px;
 }
 
-.slider input {
+.slider input[type="range"] {
   flex: 1;
   min-width: 0;
   height: 18px;
@@ -1024,13 +1024,13 @@ button:disabled {
   background: transparent;
 }
 
-.slider input::-webkit-slider-runnable-track {
+.slider input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
   background: linear-gradient(to right, var(--accent) var(--pct), var(--panel-3) var(--pct));
 }
 
-.slider input::-webkit-slider-thumb {
+.slider input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 14px;
   height: 14px;
@@ -1041,13 +1041,13 @@ button:disabled {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-.slider input::-moz-range-track {
+.slider input[type="range"]::-moz-range-track {
   height: 4px;
   border-radius: 2px;
   background: linear-gradient(to right, var(--accent) var(--pct), var(--panel-3) var(--pct));
 }
 
-.slider input::-moz-range-thumb {
+.slider input[type="range"]::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -1951,4 +1951,9 @@ button:disabled {
 
 .stage-overlay.panning:active {
   cursor: grabbing;
+}
+
+.slider .num {
+  flex: none;
+  width: 74px;
 }

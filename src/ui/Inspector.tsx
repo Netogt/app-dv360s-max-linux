@@ -381,7 +381,7 @@ function FramingSection({ l, w, h }: { l: (MediaLayer | BackgroundLayer) & Frami
           max={MAX_ZOOM * 100}
           step={5}
           onChange={(v) => set({ zoom: v / 100 }, "zoom")}
-          format={(v) => `${v}%`}
+          editable={{ suffix: "%" }}
         />
       </Row>
       <div
