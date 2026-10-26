@@ -1957,3 +1957,33 @@ button:disabled {
   flex: none;
   width: 74px;
 }
+
+/* erro num painel (no lugar dele, sem apagar o editor) */
+.guard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text);
+  min-height: 0;
+  overflow: auto;
+}
+.guard > svg {
+  color: var(--danger, #f87171);
+}
+.guard code {
+  font-size: 12px;
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--danger, #f87171);
+}
+.guard-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}

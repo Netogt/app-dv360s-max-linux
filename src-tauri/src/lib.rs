@@ -221,6 +221,22 @@ fn live_end() {
     let _ = live::send(live::END, &[]);
 }
 
+/// Erros da interface vão para o terminal e para ~/.config/dv360s-studio/editor.log.
+#[tauri::command]
+fn log_error(message: String) {
+    use std::io::Write;
+    eprintln!("[editor] {message}");
+    let path = paths::config_dir().join("editor.log");
+    // não deixa o log crescer sem limite
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 512 * 1024) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let when = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let _ = writeln!(f, "[{when}] {message}");
+    }
+}
+
 /// Instala a regra udev (pede a senha pelo polkit) para usar o USB sem root.
 #[tauri::command]
 async fn install_udev_rule() -> Result<(), String> {
@@ -445,6 +461,7 @@ pub fn run() {
             live_frame,
             live_ping,
             live_end,
+            log_error,
             cancel_video,
             install_udev_rule,
             read_sensors,

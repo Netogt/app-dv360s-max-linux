@@ -6,6 +6,7 @@ import { curLayers, duplicateLayer, getLayer, moveLayer, nudge, removeLayer, sel
 import { Inspector } from "./ui/Inspector";
 import { LayersPanel } from "./ui/LayersPanel";
 import { Stage } from "./ui/Stage";
+import { Guard } from "./ui/Guard";
 import { TopBar } from "./ui/TopBar";
 import { BusyModal, Toasts } from "./ui/feedback";
 import { LibraryModal, openLibrary } from "./ui/Library";
@@ -151,13 +152,23 @@ export default function App() {
   const ready = useDraft();
   return (
     <div className="app" onContextMenu={(e) => import.meta.env.PROD && e.preventDefault()}>
-      <TopBar />
+      <Guard name="Barra superior">
+        <TopBar />
+      </Guard>
       <div className="workspace">
-        <LayersPanel />
-        {ready ? <Stage /> : <main className="stage-area" />}
-        <Inspector />
+        <Guard name="Camadas" className="panel">
+          <LayersPanel />
+        </Guard>
+        <Guard name="Palco" className="stage-area">
+          {ready ? <Stage /> : <main className="stage-area" />}
+        </Guard>
+        <Guard name="Propriedades" className="panel">
+          <Inspector />
+        </Guard>
       </div>
-      <LibraryModal />
+      <Guard name="Temas">
+        <LibraryModal />
+      </Guard>
       <ShortcutsModal />
       <Toasts />
       <BusyModal />

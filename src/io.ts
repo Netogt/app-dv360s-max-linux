@@ -47,6 +47,7 @@ export const api = {
   readFile: async (path: string) => new Uint8Array(await invoke<ArrayBuffer>("read_file", { path })),
   writeFile: (path: string, data: Uint8Array) => invoke<void>("write_file", data, raw(path)),
   saveDraft: (data: Uint8Array) => invoke<void>("save_draft", data),
+  logError: (message: string) => invoke<void>("log_error", { message }),
   loadDraft: async () => new Uint8Array(await invoke<ArrayBuffer>("load_draft")),
   /** `source`: arquivo da biblioteca de onde o tema veio (marca-o como ativo) */
   applyTheme: (data: Uint8Array, source?: string | null) => invoke<void>("apply_theme", data, raw(source ?? undefined)),

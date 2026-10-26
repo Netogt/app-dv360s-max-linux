@@ -316,13 +316,19 @@ function FramingSection({ l, w, h }: { l: (MediaLayer | BackgroundLayer) & Frami
 
   useEffect(() => {
     const c = canvasRef.current;
-    if (!c || !src) return;
+    // quadros de vídeo saem do cache (e são fechados) enquanto ele toca: um quadro fechado
+    // tem largura 0 e o drawImage dele lança erro; fica a miniatura anterior até o próximo
+    if (!c || !src || (src instanceof ImageBitmap && src.width === 0)) return;
     const dpr = window.devicePixelRatio || 1;
     c.width = cw * dpr;
     c.height = ch * dpr;
     const ctx = c.getContext("2d")!;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(src, 0, 0, c.width, c.height);
+    try {
+      ctx.drawImage(src, 0, 0, c.width, c.height);
+    } catch {
+      // idem (fechado entre a checagem e o desenho)
+    }
   }, [src, cw, ch]);
 
   if (!a || a.error) return null;

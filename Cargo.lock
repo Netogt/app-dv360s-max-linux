@@ -891,6 +891,7 @@ dependencies = [
 name = "dv360s-studio"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dv360s-core",
  "serde",
  "serde_json",

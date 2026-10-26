@@ -90,6 +90,8 @@ export function framed(mw: number, mh: number, w: number, h: number, fit: Fit, f
 
 /** Desenha a mídia dentro da caixa centrada na origem. */
 function drawFit(ctx: CanvasRenderingContext2D, m: Source, w: number, h: number, fit: Fit, fr: Framing) {
+  // quadro de vídeo já fechado pelo cache (largura 0): o drawImage lançaria erro
+  if (m.src instanceof ImageBitmap && m.src.width === 0) return;
   const { dw, dh, ox, oy } = framed(m.w, m.h, w, h, fit, fr);
   ctx.drawImage(m.src, ox - dw / 2, oy - dh / 2, dw, dh);
 }
