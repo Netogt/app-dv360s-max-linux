@@ -20,6 +20,9 @@ O editor **nunca** fala com o USB; quem fala é o player. Ao clicar em **Enviar 
 renderiza o tema, grava `~/.config/dv360s-studio/active.dvtheme` e garante que o player está rodando.
 O player percebe o arquivo novo em até 1 s e troca o conteúdo. Pode fechar o editor depois.
 
+Detalhes de cada parte (compilação do tema, loop do player, serviços, build) em
+[docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+
 ### Por que o player é leve
 
 O editor "compila" o tema antes de enviar:
