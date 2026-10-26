@@ -2,12 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { drawingLayer } from "../defaults";
 import { liveFrame, useLive } from "../live";
 import { useDropZone } from "../nativeDrop";
-import { onAssetsChanged } from "../render/assets";
-import { drawScene, isAnimated } from "../render/draw";
+import { getAsset, onAssetsChanged } from "../render/assets";
+import { drawScene, framed, isAnimated, MAX_ZOOM, MIN_ZOOM } from "../render/draw";
 import { setSimulated, useSimulated, watchSensors } from "../render/sensors";
 import { updatesEverySecond, usesSensors } from "../render/text";
 import { addLayer, curLayers, getLayer, select, store, updateLayer, useStore } from "../store";
-import type { ClockLayer, DrawingLayer, Layer, TextLayer } from "../types";
+import type { BackgroundLayer, ClockLayer, DrawingLayer, Layer, TextLayer } from "../types";
 import { SIZE } from "../types";
 import { rotate, uid } from "../util";
 import { nextRotation, playerConfig, usePlayerConfig } from "../playerConfig";
@@ -19,7 +19,8 @@ type Drag =
   | { type: "move"; id: string; key: string; sx: number; sy: number; ox: number; oy: number }
   | { type: "resize"; id: string; key: string; hx: number; hy: number; start: Box; fontSize?: number }
   | { type: "rotate"; id: string; key: string; cx: number; cy: number }
-  | { type: "draw"; id: string; key: string };
+  | { type: "draw"; id: string; key: string }
+  | { type: "pan"; id: string; key: string; sx: number; sy: number; fx: number; fy: number };
 
 const MIN = 8;
 const HANDLES: [string, number, number][] = [
@@ -64,6 +65,17 @@ function resizeBox(s: Box, hx: number, hy: number, x: number, y: number, keep: b
   const cly = fromCenter || !hy ? 0 : ay + (hy * h) / 2;
   const [dx, dy] = rotate(clx, cly, s.rotation);
   return { x: cx0 + dx - w / 2, y: cy0 + dy - h / 2, w, h, k: w / s.w };
+}
+
+/** Fundo com mídia que pode ser enquadrado no palco (arrastar / roda do mouse). */
+function frameableBg(l: Layer | null): l is BackgroundLayer {
+  return !!l && l.kind === "background" && !l.locked && l.visible && !!getAsset(l.asset) && !getAsset(l.asset)!.error;
+}
+
+/** Tamanho com que a mídia do fundo aparece (para converter arrastar em foco). */
+function bgFramed(l: BackgroundLayer) {
+  const a = getAsset(l.asset)!;
+  return framed(a.width, a.height, SIZE, SIZE, l.fit, l);
 }
 
 function toDrawing(l: DrawingLayer, x: number, y: number): [number, number] {
@@ -113,6 +125,24 @@ export function Stage() {
   }, []);
 
   useEffect(() => onAssetsChanged(() => setAssetsTick((n) => n + 1)), []);
+
+  // roda do mouse com o fundo selecionado: zoom da mídia (Ctrl + roda continua sendo o zoom do palco).
+  // Ouvinte nativo porque o onWheel do React é passivo e não consegue impedir a rolagem.
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return;
+      const st = store.get();
+      const l = getLayer(st.selectedId);
+      if (!frameableBg(l) || !(e.target as HTMLElement).closest(".stage")) return;
+      e.preventDefault();
+      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, (l.zoom ?? 1) * Math.exp(-e.deltaY * 0.0015)));
+      updateLayer<BackgroundLayer>(l.id, { zoom: Math.round(z * 100) / 100 }, `${l.id}:zoom`);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const draw = useCallback(() => {
     const c = canvasRef.current;
@@ -261,6 +291,9 @@ export function Stage() {
         if (target) {
           select(target.id);
           dragRef.current = { type: "move", id: target.id, key, sx: x, sy: y, ox: target.x, oy: target.y };
+        } else if (frameableBg(current)) {
+          // fundo selecionado: arrastar escolhe a parte da mídia que aparece
+          dragRef.current = { type: "pan", id: current.id, key, sx: x, sy: y, fx: current.focusX ?? 0.5, fy: current.focusY ?? 0.5 };
         } else select(null);
       }
     }
@@ -314,6 +347,20 @@ export function Stage() {
         updateLayer(l.id, { rotation: Math.round(a * 10) / 10 }, d.key);
         break;
       }
+      case "pan": {
+        if (l.kind !== "background" || !getAsset(l.asset)) break;
+        const { dw, dh } = bgFramed(l);
+        const c01 = (v: number) => Math.min(1, Math.max(0, v));
+        updateLayer<BackgroundLayer>(
+          l.id,
+          {
+            focusX: Math.abs(dw - SIZE) > 0.5 ? c01(d.fx - (x - d.sx) / (dw - SIZE)) : (l.focusX ?? 0.5),
+            focusY: Math.abs(dh - SIZE) > 0.5 ? c01(d.fy - (y - d.sy) / (dh - SIZE)) : (l.focusY ?? 0.5),
+          },
+          d.key,
+        );
+        break;
+      }
       case "draw": {
         if (l.kind !== "drawing") break;
         const [px, py] = toDrawing(l, x, y);
@@ -346,6 +393,9 @@ export function Stage() {
     if (hit && (hit.kind === "text" || hit.kind === "clock")) {
       select(hit.id);
       window.dispatchEvent(new CustomEvent("dv:edit-text"));
+    } else if (!hit) {
+      // duplo clique no vazio seleciona o fundo
+      select(curLayers()[0].id);
     }
   };
 
@@ -390,7 +440,7 @@ export function Stage() {
           )}
           <div
             ref={overlayRef}
-            className={`stage-overlay ${drawingMode ? "drawing" : ""}`}
+            className={`stage-overlay ${drawingMode ? "drawing" : ""} ${!drawingMode && frameableBg(sel) ? "panning" : ""}`}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}

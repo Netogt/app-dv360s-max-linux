@@ -44,19 +44,29 @@ export interface Playback {
   trimEnd: number;
 }
 
+/** Enquadramento da mídia dentro da caixa: aproximar/afastar e qual parte fica visível.
+ *  Campos opcionais: projetos antigos não têm (= 1, centro). */
+export interface Framing {
+  /** 1 = o tamanho dado pelo ajuste (preencher/caber/esticar) */
+  zoom?: number;
+  /** 0 = encosta na esquerda/topo, 0.5 = centro, 1 = direita/base */
+  focusX?: number;
+  focusY?: number;
+}
+
 export type Fill =
   | { type: "solid"; color: string }
   | { type: "linear"; from: string; to: string; angle: number }
   | { type: "radial"; from: string; to: string };
 
-export interface BackgroundLayer extends LayerBase, Playback {
+export interface BackgroundLayer extends LayerBase, Playback, Framing {
   kind: "background";
   fill: Fill;
   asset: string | null;
   fit: Fit;
 }
 
-export interface MediaLayer extends LayerBase, Playback {
+export interface MediaLayer extends LayerBase, Playback, Framing {
   kind: "media";
   asset: string;
   fit: Fit;

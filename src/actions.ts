@@ -64,7 +64,7 @@ export async function importFiles(files: File[], asBackground = false) {
     if (asBackground) {
       store.update((p) => ({ ...p, assets: { ...p.assets, [id]: meta } }));
       const bg = curLayers()[0];
-      updateLayer<BackgroundLayer>(bg.id, { asset: id, trimStart: 0, trimEnd: 0 });
+      updateLayer<BackgroundLayer>(bg.id, { asset: id, trimStart: 0, trimEnd: 0, zoom: 1, focusX: 0.5, focusY: 0.5 });
       store.set({ selectedId: bg.id });
     } else {
       store.update((p) => ({ ...p, assets: { ...p.assets, [id]: meta } }));
@@ -336,5 +336,5 @@ export async function loadDraft(): Promise<boolean> {
 }
 
 export function setBackgroundMedia(id: string | null) {
-  updateLayer<BackgroundLayer>(curLayers()[0].id, { asset: id });
+  updateLayer<BackgroundLayer>(curLayers()[0].id, { asset: id, zoom: 1, focusX: 0.5, focusY: 0.5 });
 }

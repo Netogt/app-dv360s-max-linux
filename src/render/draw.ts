@@ -1,6 +1,6 @@
 // Desenho das camadas no canvas — usado pela prévia e pela renderização do tema.
 
-import type { BackgroundLayer, DrawingLayer, Fill, Fit, Layer, MediaLayer, ShapeLayer } from "../types";
+import type { BackgroundLayer, DrawingLayer, Fill, Fit, Framing, Layer, MediaLayer, ShapeLayer } from "../types";
 import { SIZE } from "../types";
 import { deg2rad } from "../util";
 import { getAsset, gifFrameAt, mediaTime, videoFrameAt, type RuntimeAsset } from "./assets";
@@ -67,16 +67,31 @@ function mediaSource(a: RuntimeAsset, p: MediaLayer | BackgroundLayer, env: Draw
   return f ? { src: f, w: f.width, h: f.height } : null;
 }
 
-/** Desenha a mídia dentro da caixa centrada na origem. */
-function drawFit(ctx: CanvasRenderingContext2D, m: Source, w: number, h: number, fit: Fit) {
-  if (fit === "fill") {
-    ctx.drawImage(m.src, -w / 2, -h / 2, w, h);
-    return;
+export const MIN_ZOOM = 0.25;
+export const MAX_ZOOM = 4;
+
+/** Tamanho da mídia (mw × mh) desenhada numa caixa w × h, e o deslocamento do centro dela
+ *  em relação ao centro da caixa. O foco escolhe qual parte aparece quando ela não cabe. */
+export function framed(mw: number, mh: number, w: number, h: number, fit: Fit, fr: Framing) {
+  const zoom = fr.zoom ?? 1;
+  let dw = w;
+  let dh = h;
+  if (fit !== "fill") {
+    const s = fit === "cover" ? Math.max(w / mw, h / mh) : Math.min(w / mw, h / mh);
+    dw = mw * s;
+    dh = mh * s;
   }
-  const s = fit === "cover" ? Math.max(w / m.w, h / m.h) : Math.min(w / m.w, h / m.h);
-  const dw = m.w * s;
-  const dh = m.h * s;
-  ctx.drawImage(m.src, -dw / 2, -dh / 2, dw, dh);
+  dw *= zoom;
+  dh *= zoom;
+  const ox = (0.5 - (fr.focusX ?? 0.5)) * (dw - w);
+  const oy = (0.5 - (fr.focusY ?? 0.5)) * (dh - h);
+  return { dw, dh, ox, oy };
+}
+
+/** Desenha a mídia dentro da caixa centrada na origem. */
+function drawFit(ctx: CanvasRenderingContext2D, m: Source, w: number, h: number, fit: Fit, fr: Framing) {
+  const { dw, dh, ox, oy } = framed(m.w, m.h, w, h, fit, fr);
+  ctx.drawImage(m.src, ox - dw / 2, oy - dh / 2, dw, dh);
 }
 
 const drawingCache = new WeakMap<DrawingLayer["strokes"], HTMLCanvasElement>();
@@ -153,7 +168,7 @@ export function drawLayer(ctx: CanvasRenderingContext2D, l: Layer, env: DrawEnv)
       ctx.beginPath();
       ctx.rect(-SIZE / 2, -SIZE / 2, SIZE, SIZE);
       ctx.clip();
-      drawFit(ctx, m, SIZE, SIZE, l.fit);
+      drawFit(ctx, m, SIZE, SIZE, l.fit, l);
     }
     ctx.restore();
     return;
@@ -169,7 +184,7 @@ export function drawLayer(ctx: CanvasRenderingContext2D, l: Layer, env: DrawEnv)
       if (!m) break;
       roundRectPath(ctx, -l.w / 2, -l.h / 2, l.w, l.h, l.radius);
       ctx.clip();
-      drawFit(ctx, m, l.w, l.h, l.fit);
+      drawFit(ctx, m, l.w, l.h, l.fit, l);
       break;
     }
     case "text":

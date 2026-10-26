@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACCEPT_IMAGE, ACCEPT_VIDEO, pickMedia, renderSpeed, setBackgroundMedia } from "../actions";
-import { drawScene } from "../render/draw";
+import { drawScene, framed, MAX_ZOOM, MIN_ZOOM } from "../render/draw";
 import { formatBytes } from "../util";
 import { CLOCK_PRESETS, FONT_FALLBACK } from "../defaults";
 import { api } from "../io";
-import { getAsset, loopDuration, onAssetsChanged, type RuntimeAsset } from "../render/assets";
+import { getAsset, loopDuration, onAssetsChanged, videoFrameAt, type RuntimeAsset } from "../render/assets";
 import { estimateFrames } from "../render/compile";
 import { liveReadings, watchSensors } from "../render/sensors";
 import { rulesUseSensors } from "../render/rules";
@@ -13,7 +13,7 @@ import { curLayers, curScreen, store, updateLayer, updateProject, useStore } fro
 import { ScreenSettings, SensorSimulator } from "./Screens";
 import { ShortcutList } from "./Shortcuts";
 import type {
-  BackgroundLayer, BasePatch, ClockLayer, DrawingLayer, Fill, Fit, Layer, MediaLayer, Playback, Project, ShapeLayer, TextLayer, TextStyle,
+  BackgroundLayer, BasePatch, ClockLayer, DrawingLayer, Fill, Fit, Framing, Layer, MediaLayer, Playback, Project, ShapeLayer, TextLayer, TextStyle,
 } from "../types";
 import { SIZE } from "../types";
 import { ColorField, NumberField, Row, Section, Segmented, Select, Slider, Toggle, useDismiss } from "./controls";
@@ -294,6 +294,130 @@ function PlaybackSection({ l }: { l: (MediaLayer | BackgroundLayer) & Playback }
   );
 }
 
+/** Primeiro quadro da mídia (para o seletor de enquadramento). */
+function firstFrame(a: RuntimeAsset, at: number): CanvasImageSource | null {
+  if (a.meta.type === "image") return a.image ?? null;
+  if (a.meta.type === "gif") return a.gif?.frames[0] ?? null;
+  return videoFrameAt(a, at);
+}
+
+const PICK_W = 248;
+const PICK_H = 170;
+
+/** Aproximar/afastar e escolher a parte da mídia que fica visível na caixa (w × h). */
+function FramingSection({ l, w, h }: { l: (MediaLayer | BackgroundLayer) & Framing & Playback; w: number; h: number }) {
+  const a = getAsset(l.asset);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drag = useRef<{ x: number; y: number; fx: number; fy: number } | null>(null);
+  const src = a && !a.error && !a.progress ? firstFrame(a, l.trimStart) : null;
+  const ratio = a ? a.width / a.height : 1;
+  const cw = Math.round(ratio >= PICK_W / PICK_H ? PICK_W : PICK_H * ratio);
+  const ch = Math.round(ratio >= PICK_W / PICK_H ? PICK_W / ratio : PICK_H);
+
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c || !src) return;
+    const dpr = window.devicePixelRatio || 1;
+    c.width = cw * dpr;
+    c.height = ch * dpr;
+    const ctx = c.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+  }, [src, cw, ch]);
+
+  if (!a || a.error) return null;
+  const zoom = l.zoom ?? 1;
+  const fx = l.focusX ?? 0.5;
+  const fy = l.focusY ?? 0.5;
+  const { dw, dh } = framed(a.width, a.height, w, h, l.fit, l);
+  // janela visível, em frações da mídia
+  const vw = Math.min(1, w / dw);
+  const vh = Math.min(1, h / dh);
+  const left = dw > w ? (fx * (dw - w)) / dw : 0;
+  const top = dh > h ? (fy * (dh - h)) / dh : 0;
+  const pannable = dw - w > 0.5 || dh - h > 0.5;
+  const set = (patch: Framing, f: string) => updateLayer(l.id, patch, `${l.id}:${f}`);
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  // frações da mídia → foco (só nos eixos em que ela passa da caixa)
+  const focusFor = (lx: number, ty: number) => ({
+    focusX: dw - w > 0.5 ? clamp01((lx * dw) / (dw - w)) : fx,
+    focusY: dh - h > 0.5 ? clamp01((ty * dh) / (dh - h)) : fy,
+  });
+
+  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!pannable) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width;
+    const py = (e.clientY - r.top) / r.height;
+    const inside = px >= left && px <= left + vw && py >= top && py <= top + vh;
+    let start = { fx, fy };
+    if (!inside) {
+      // clicou fora: centraliza a janela ali
+      const f = focusFor(px - vw / 2, py - vh / 2);
+      set(f, "focus");
+      start = { fx: f.focusX, fy: f.focusY };
+    }
+    drag.current = { x: e.clientX, y: e.clientY, ...start };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const sl = dw > w ? (d.fx * (dw - w)) / dw : 0;
+    const st = dh > h ? (d.fy * (dh - h)) / dh : 0;
+    set(focusFor(sl + (e.clientX - d.x) / r.width, st + (e.clientY - d.y) / r.height), "focus");
+  };
+  const onUp = () => {
+    drag.current = null;
+  };
+
+  return (
+    <Section title="Enquadramento">
+      <Row label="Zoom">
+        <Slider
+          value={Math.round(zoom * 100)}
+          min={MIN_ZOOM * 100}
+          max={MAX_ZOOM * 100}
+          step={5}
+          onChange={(v) => set({ zoom: v / 100 }, "zoom")}
+          format={(v) => `${v}%`}
+        />
+      </Row>
+      <div
+        className={`framing ${pannable ? "pannable" : ""}`}
+        style={{ width: cw, height: ch }}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+      >
+        <canvas ref={canvasRef} style={{ width: cw, height: ch }} />
+        {pannable && (
+          <div
+            className="framing-window"
+            style={{ left: `${left * 100}%`, top: `${top * 100}%`, width: `${vw * 100}%`, height: `${vh * 100}%` }}
+          />
+        )}
+      </div>
+      <p className="note">
+        {pannable
+          ? "O retângulo é o que aparece na tela: arraste-o (ou clique onde quiser) para escolher a parte."
+          : "A mídia inteira já aparece. Aumente o zoom ou use “Preencher” para escolher uma parte."}
+        {l.kind === "background" && " No palco: arraste o fundo para mover e use a roda do mouse para o zoom."}
+      </p>
+      <div className="btn-row">
+        <button type="button" className="btn small" onClick={() => set({ focusX: 0.5, focusY: 0.5 }, "center")}>
+          Centralizar
+        </button>
+        <button type="button" className="btn small ghost" onClick={() => set({ zoom: 1, focusX: 0.5, focusY: 0.5 }, "reset")}>
+          Redefinir
+        </button>
+      </div>
+    </Section>
+  );
+}
+
 function MediaInspector({ l }: { l: MediaLayer }) {
   const a = getAsset(l.asset);
   const set = (patch: Partial<MediaLayer>, f: string) => updateLayer(l.id, patch, `${l.id}:${f}`);
@@ -313,6 +437,7 @@ function MediaInspector({ l }: { l: MediaLayer }) {
           </button>
         )}
       </Section>
+      <FramingSection l={l} w={l.w} h={l.h} />
       <PlaybackSection l={l} />
     </>
   );
@@ -392,6 +517,7 @@ function BackgroundInspector({ l }: { l: BackgroundLayer }) {
         )}
         <p className="note">Dica: arraste um arquivo para a tela e solte em “Usar como fundo”.</p>
       </Section>
+      {l.asset && <FramingSection l={l} w={SIZE} h={SIZE} />}
       {l.asset && <PlaybackSection l={l} />}
       <Section title="Opacidade da mídia" defaultOpen={false}>
         <Slider value={Math.round(l.opacity * 100)} min={0} max={100} onChange={(v) => updateLayer(l.id, { opacity: v / 100 }, `${l.id}:op`)} format={(v) => `${v}%`} />
