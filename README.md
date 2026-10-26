@@ -140,6 +140,21 @@ journalctl --user -u dv360s-player -f               # log do player ao vivo
 
 Mais em [Problemas comuns](#problemas-comuns).
 
+### Parar o player
+
+Ao parar, o player envia o comando de fim de sessão e a tela do cooler volta ao logo de fábrica.
+
+| Como | Efeito |
+|---|---|
+| Editor: botão de status do cooler › **Parar player** | Para agora; volta no próximo login se o início automático estiver ligado |
+| Bandeja: desmarcar **Player ligado** | Idem |
+| `systemctl --user stop dv360s-player` | Idem (parar assim não dispara o `Restart=on-failure`) |
+| Desligar **Iniciar com o sistema** no editor, ou `systemctl --user disable --now dv360s-player` | Para agora e não sobe mais no login |
+| `pkill -x dv360s-player` | Para um player iniciado à mão (fora do systemd) |
+
+Para voltar: **Enviar para a tela** ou **Iniciar player** no editor, marcar **Player ligado** na
+bandeja, ou `systemctl --user start dv360s-player`.
+
 ### Só o executável, sem instalar
 
 ```bash
