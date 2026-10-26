@@ -62,15 +62,94 @@ pincel, borracha · **Espaço** tocar/pausar · **?** lista completa.
 
 ## Instalar
 
-Requisitos (Arch/CachyOS): `webkit2gtk-4.1`, `libusb`, `ffmpeg` (para importar vídeo), Rust e Node.
+### 1. Dependências do sistema (uma vez)
+
+Arch/CachyOS:
+
+```bash
+sudo pacman -S --needed base-devel webkit2gtk-4.1 libusb ffmpeg rustup nodejs npm
+rustup default stable
+```
+
+`ffmpeg` só é usado para importar vídeos no editor.
+
+### 2. PATH
+
+O `install.sh` instala os programas em `~/.local/bin`. Se ele não estiver no PATH:
+
+```bash
+fish_add_path $HOME/.local/bin                  # fish
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc   # bash
+```
+
+Se o Rust ou o Node foram instalados fora do pacman (por exemplo com `rustup` em `~/.cargo/bin` ou
+Node extraído em `~/.local/node/bin`), adicione essas pastas também, ou `cargo`/`npx` não serão
+encontrados.
+
+### 3. Compilar e instalar
 
 ```bash
 ./scripts/install.sh
 ```
 
-Isso compila em release, instala `dv360s-studio`, `dv360s-player` e `dv360s-tray` em `~/.local/bin`, cria o atalho no
-menu e instala a regra udev `/etc/udev/rules.d/99-dv360s.rules` (pede a senha uma vez). A regra também
-pode ser instalada pelo próprio app: botão de status do cooler › **Permitir acesso ao USB**.
+O script:
+
+1. roda `npm install`;
+2. compila o editor, o player e a bandeja em release;
+3. copia `dv360s-studio`, `dv360s-player` e `dv360s-tray` para `~/.local/bin`;
+4. cria o atalho **DV360S Studio** no menu de aplicativos;
+5. instala a regra udev `/etc/udev/rules.d/99-dv360s.rules` para acessar o USB sem root (pede a
+   senha só na primeira vez). A regra também pode ser instalada pelo app: botão de status do
+   cooler › **Permitir acesso ao USB**;
+6. reinicia o player e a bandeja, se já estiverem rodando como serviço.
+
+### 4. Ligar o início automático (uma vez, no editor)
+
+O script **não** liga o início com o sistema. Abra o DV360S Studio, clique no botão de status do
+cooler (canto superior) e ligue:
+
+- **Iniciar com o sistema**: o player vira um serviço de usuário do systemd e sobe no login;
+- **Ícone na bandeja** (opcional): idem para o `dv360s-tray`, que sobe com a sessão gráfica.
+
+> Se esses serviços foram ligados antes usando os binários de `target/release/` (rodando direto da
+> pasta do projeto), desligue e ligue de novo depois do `install.sh`. Assim eles passam a apontar
+> para `~/.local/bin` e não param se a pasta do projeto for movida ou apagada.
+
+### 5. Usar
+
+Monte o tema e clique em **Enviar para a tela**. Pode fechar o editor depois: o player continua
+rodando e volta sozinho quando o computador reinicia.
+
+### Atualizar depois de mudar o código
+
+Feche o editor (só pode haver uma instância aberta) e rode de novo:
+
+```bash
+./scripts/install.sh
+```
+
+Ele recompila, substitui os binários e reinicia o player e a bandeja.
+
+### Conferir se está funcionando
+
+```bash
+systemctl --user status dv360s-player dv360s-tray   # os dois "active (running)"
+dv360s-player --sensores                            # temperaturas detectadas
+journalctl --user -u dv360s-player -f               # log do player ao vivo
+```
+
+Mais em [Problemas comuns](#problemas-comuns).
+
+### Só o executável, sem instalar
+
+```bash
+npx tauri build --no-bundle                         # editor → target/release/dv360s-studio
+cargo build --release -p dv360s-player -p dv360s-tray
+```
+
+O editor sozinho não mostra nada no cooler: quem fala com o USB é o player. Para gerar pacotes
+`.deb`, `.rpm` e AppImage em `target/release/bundle/`, use `npm run build`. Os pacotes dependem do
+WebKitGTK 4.1 e do libusb instalados no sistema.
 
 ## Desenvolvimento
 
